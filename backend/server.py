@@ -582,7 +582,8 @@ client.on("ready", () => {{
   }}, 60000);
 }});
 
-client.on("message", async (msg) => {{
+client.on("message_create", async (msg) => {{
+  if (msg.fromMe) return;
   const text = msg.body || "";
   const chat = await msg.getChat();
   const lower = text.trim().toLowerCase();

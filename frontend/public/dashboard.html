@@ -306,7 +306,7 @@ async function renderSection() {
     case 'banned': await renderBannedWords(el); break;
     case 'commands': await renderCommands(el); break;
     case 'settings': await renderSettings(el); break;
-    case 'generator': renderGenerator(el); break;
+    case 'generator': renderGeneratorGated(el); break;
     case 'recidivistes': await renderRecidivistes(el); break;
     case 'whitelist': await renderWhitelist(el); break;
     case 'scheduled': await renderScheduled(el); break;
@@ -974,6 +974,53 @@ function resetSettings() {
 
 // ── GENERATOR ───────────────────────────────────────────────
 let genCode = null, genStats = null, genLoading = false;
+let genUnlocked = false;
+
+function renderGeneratorGated(el) {
+  // Si déjà déverrouillé localement OU auth globale active → afficher
+  if (genUnlocked || authToken) {
+    renderGenerator(el);
+    return;
+  }
+  el.innerHTML = `
+    <div class="space-y-6 max-w-sm">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Exportation</p>
+        <h2 class="text-2xl font-black text-white font-heading">Générateur de Bot</h2>
+      </div>
+      <form onsubmit="checkGenPassword(event)" class="p-5 border border-amber-500/30 bg-amber-500/5 space-y-4">
+        <p class="font-mono text-xs uppercase tracking-widest text-amber-400">⚠ Accès restreint</p>
+        <p class="text-zinc-400 text-sm">Le générateur est protégé par mot de passe car il contient votre clé API OpenAI.</p>
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Mot de passe admin</label>
+          <input id="gen-password" type="password" required placeholder="••••••••"
+            class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+        </div>
+        <div id="gen-pw-error" class="hidden text-red-400 text-xs font-mono">Mot de passe incorrect</div>
+        <button type="submit" class="w-full px-4 py-2.5 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+          Déverrouiller
+        </button>
+      </form>
+    </div>`;
+}
+
+async function checkGenPassword(e) {
+  e.preventDefault();
+  const pw = document.getElementById('gen-password').value;
+  try {
+    const r = await fetch(API + '/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: pw}) });
+    const data = await r.json();
+    if (data.ok) {
+      genUnlocked = true;
+      authToken = data.token;
+      localStorage.setItem('crous_auth_token', authToken);
+      document.getElementById('logout-btn').classList.remove('hidden');
+      renderGenerator(document.getElementById('content'));
+    } else {
+      document.getElementById('gen-pw-error').classList.remove('hidden');
+    }
+  } catch { document.getElementById('gen-pw-error').classList.remove('hidden'); }
+}
 
 function renderGenerator(el) {
   el.innerHTML = `
