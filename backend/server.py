@@ -1,9 +1,11 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import aiofiles
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
@@ -11,6 +13,8 @@ import uuid
 from datetime import datetime, timezone
 
 ROOT_DIR = Path(__file__).parent
+UPLOADS_DIR = ROOT_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
@@ -18,6 +22,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger(__name__)
@@ -32,6 +37,8 @@ class AutoReply(BaseModel):
     response: str
     type: Literal["exact", "contains", "regex"] = "exact"
     active: bool = True
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class AutoReplyCreate(BaseModel):
@@ -39,23 +46,31 @@ class AutoReplyCreate(BaseModel):
     response: str
     type: Literal["exact", "contains", "regex"] = "exact"
     active: bool = True
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 class AutoReplyUpdate(BaseModel):
     trigger: Optional[str] = None
     response: Optional[str] = None
     type: Optional[Literal["exact", "contains", "regex"]] = None
     active: Optional[bool] = None
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 class BannedWord(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     word: str
     category: Literal["insultes", "religieux"] = "insultes"
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class BannedWordCreate(BaseModel):
     word: str
     category: Literal["insultes", "religieux"] = "insultes"
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 class Command(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -65,6 +80,8 @@ class Command(BaseModel):
     category: Literal["IA", "Fun", "Jeux", "Utile"] = "Fun"
     emoji: str = "🤖"
     active: bool = True
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class CommandCreate(BaseModel):
@@ -73,6 +90,8 @@ class CommandCreate(BaseModel):
     category: Literal["IA", "Fun", "Jeux", "Utile"] = "Fun"
     emoji: str = "🤖"
     active: bool = True
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 class CommandUpdate(BaseModel):
     command: Optional[str] = None
@@ -80,6 +99,8 @@ class CommandUpdate(BaseModel):
     category: Optional[Literal["IA", "Fun", "Jeux", "Utile"]] = None
     emoji: Optional[str] = None
     active: Optional[bool] = None
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
 
 class BotSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -313,6 +334,33 @@ async def get_stats():
 async def root():
     return {"message": "WhatsApp Bot Dashboard API"}
 
+# ── Upload fichier media ──────────────────────────────────────
+
+ALLOWED_IMAGE = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_AUDIO = {".mp4", ".mp3", ".ogg", ".wav", ".m4a"}
+
+@api_router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_IMAGE and ext not in ALLOWED_AUDIO:
+        raise HTTPException(status_code=400, detail=f"Format non supporté : {ext}")
+    file_id = str(uuid.uuid4())
+    filename = f"{file_id}{ext}"
+    file_path = UPLOADS_DIR / filename
+    async with aiofiles.open(file_path, "wb") as f:
+        content = await file.read()
+        await f.write(content)
+    file_type = "image" if ext in ALLOWED_IMAGE else "audio"
+    url = f"/uploads/{filename}"
+    return {"url": url, "type": file_type, "filename": filename}
+
+@api_router.delete("/upload/{filename}")
+async def delete_upload(filename: str):
+    file_path = UPLOADS_DIR / filename
+    if file_path.exists():
+        file_path.unlink()
+    return {"ok": True}
+
 # ── Générateur index.js ───────────────────────────────────────
 
 @api_router.get("/generate-bot")
@@ -345,9 +393,20 @@ async def generate_bot():
             cond = f'lower.includes("{t}")'
         else:
             cond = f'/{t}/i.test(lower)'
+        image_url = r.get("image_url")
+        audio_url = r.get("audio_url")
+        media_lines = ""
+        if image_url:
+            full_url = f"{dashboard_url}{image_url}"
+            media_lines += f'\n    await sendMedia(chat, "{full_url}", "{resp}");'
+        elif audio_url:
+            full_url = f"{dashboard_url}{audio_url}"
+            media_lines += f'\n    await sendAudio(chat, "{full_url}");'
+        else:
+            media_lines = f'\n    await msg.reply("{resp}");'
         auto_reply_blocks.append(
-            f'  if ({cond}) {{\n'
-            f'    await msg.reply("{resp}");\n'
+            f'  if ({cond}) {{'
+            f'{media_lines}\n'
             f'    logToDashboard("autoreply", "Auto-réponse déclenchée", \'Trigger "{t}" → réponse envoyée dans \' + (chat.name || msg.from));\n'
             f'    return;\n'
             f'  }}'
@@ -363,9 +422,19 @@ async def generate_bot():
         cmd_trigger = c["command"].split(" ")[0].lower().replace('"', '\\"')
         desc = c["description"].replace('"', '\\"')
         emoji = c.get("emoji", "🤖")
+        image_url = c.get("image_url")
+        audio_url = c.get("audio_url")
+        if image_url:
+            full_url = f"{dashboard_url}{image_url}"
+            media_line = f'    await sendMedia(chat, "{full_url}", "{emoji} *{desc}*");'
+        elif audio_url:
+            full_url = f"{dashboard_url}{audio_url}"
+            media_line = f'    await msg.reply("{emoji} *{desc}*");\n    await sendAudio(chat, "{full_url}");'
+        else:
+            media_line = f'    await msg.reply("{emoji} *{desc}*");'
         custom_cmd_blocks.append(
             f'  if (lower === "{cmd_trigger}") {{\n'
-            f'    await msg.reply("{emoji} *{desc}*");\n'
+            f'{media_line}\n'
             f'    logToDashboard("command", "Commande {cmd_trigger} exécutée", \'Utilisée dans \' + (chat.name || msg.from));\n'
             f'    return;\n'
             f'  }}'
@@ -480,6 +549,25 @@ const client = new Client({{
   authStrategy: new LocalAuth({{ dataPath: "./session" }}),
   puppeteer: {{ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }},
 }});
+
+// ── Envoi de media ────────────────────────────────────────────
+const {{ MessageMedia }} = require("whatsapp-web.js");
+
+async function sendMedia(chat, url, caption) {{
+  try {{
+    const media = await MessageMedia.fromUrl(url, {{ unsafeMime: true }});
+    await chat.sendMessage(media, {{ caption }});
+  }} catch (e) {{
+    await chat.sendMessage(caption || "");
+  }}
+}}
+
+async function sendAudio(chat, url) {{
+  try {{
+    const media = await MessageMedia.fromUrl(url, {{ unsafeMime: true }});
+    await chat.sendMessage(media, {{ sendAudioAsVoice: true }});
+  }} catch (e) {{}}
+}}
 
 client.on("qr", (qr) => {{ console.log("\\n📱 Scanne ce QR code avec WhatsApp :\\n"); qrcode.generate(qr, {{ small: true }}); }});
 client.on("authenticated", () => console.log("✅ Authentifié !"));

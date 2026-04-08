@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
 import {
   Robot, ChatCircleDots, ShieldWarning, Terminal,
@@ -6,8 +6,7 @@ import {
   X, MagnifyingGlass, ArrowClockwise, FloppyDisk,
   Circle, Lightning, Smiley, GameController, Wrench,
   Eye, EyeSlash, ToggleLeft, ToggleRight, Code, DownloadSimple,
-  Copy, Warning, ArrowRight, NumberCircleOne, NumberCircleTwo,
-  NumberCircleThree, NumberCircleFour
+  Copy, Warning, Image, SpeakerHigh, UploadSimple, FilmSlate
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -56,6 +55,92 @@ function Notification({ msg, type }) {
   return (
     <div className={`fixed top-4 right-4 z-50 px-4 py-3 border text-sm font-mono flex items-center gap-2 ${colors}`} data-testid="notification">
       {type === "success" ? <Check size={14} /> : <X size={14} />} {msg}
+    </div>
+  );
+}
+
+// ── Composant upload media ────────────────────────────────────
+
+function MediaUploader({ imageUrl, audioUrl, onImageChange, onAudioChange }) {
+  const imgRef = useRef();
+  const audioRef = useRef();
+  const [uploading, setUploading] = useState({ image: false, audio: false });
+
+  const upload = async (file, type) => {
+    setUploading(u => ({ ...u, [type]: true }));
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await axios.post(`${API}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      if (type === "image") onImageChange(r.data.url);
+      else onAudioChange(r.data.url);
+    } catch { alert("Erreur lors de l'upload"); }
+    setUploading(u => ({ ...u, [type]: false }));
+  };
+
+  const removeImage = async () => {
+    if (imageUrl) { const fn = imageUrl.split("/").pop(); await axios.delete(`${API}/upload/${fn}`).catch(() => {}); }
+    onImageChange(null);
+  };
+  const removeAudio = async () => {
+    if (audioUrl) { const fn = audioUrl.split("/").pop(); await axios.delete(`${API}/upload/${fn}`).catch(() => {}); }
+    onAudioChange(null);
+  };
+
+  const BACKEND = process.env.REACT_APP_BACKEND_URL;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Image */}
+      <div>
+        <label className="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest flex items-center gap-1.5">
+          <Image size={11} /> Image (optionnel)
+        </label>
+        {imageUrl ? (
+          <div className="relative group border border-white/10 bg-[#030305]">
+            <img src={`${BACKEND}${imageUrl}`} alt="preview" className="w-full h-28 object-cover" />
+            <button type="button" onClick={removeImage} data-testid="remove-image-btn"
+              className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => imgRef.current.click()} data-testid="upload-image-btn"
+            className="w-full h-20 border border-dashed border-white/10 bg-[#030305] flex flex-col items-center justify-center gap-1.5 text-zinc-600 hover:border-emerald-500/40 hover:text-zinc-400 transition-all duration-200">
+            {uploading.image ? <span className="text-xs font-mono text-emerald-400">Upload...</span> : (
+              <><UploadSimple size={18} /><span className="text-xs font-mono">.jpg .png .gif</span></>
+            )}
+          </button>
+        )}
+        <input ref={imgRef} type="file" accept=".jpg,.jpeg,.png,.gif,.webp" className="hidden"
+          onChange={e => e.target.files[0] && upload(e.target.files[0], "image")} />
+      </div>
+
+      {/* Audio / MP4 */}
+      <div>
+        <label className="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest flex items-center gap-1.5">
+          <FilmSlate size={11} /> Son / MP4 (optionnel)
+        </label>
+        {audioUrl ? (
+          <div className="border border-white/10 bg-[#030305] p-2 flex items-center gap-2">
+            <SpeakerHigh size={16} className="text-emerald-400 shrink-0" />
+            <span className="font-mono text-xs text-zinc-400 truncate flex-1">{audioUrl.split("/").pop()}</span>
+            <button type="button" onClick={removeAudio} data-testid="remove-audio-btn"
+              className="text-zinc-500 hover:text-red-400 transition-colors duration-200 shrink-0">
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => audioRef.current.click()} data-testid="upload-audio-btn"
+            className="w-full h-20 border border-dashed border-white/10 bg-[#030305] flex flex-col items-center justify-center gap-1.5 text-zinc-600 hover:border-emerald-500/40 hover:text-zinc-400 transition-all duration-200">
+            {uploading.audio ? <span className="text-xs font-mono text-emerald-400">Upload...</span> : (
+              <><UploadSimple size={18} /><span className="text-xs font-mono">.mp4 .mp3 .ogg</span></>
+            )}
+          </button>
+        )}
+        <input ref={audioRef} type="file" accept=".mp4,.mp3,.ogg,.wav,.m4a" className="hidden"
+          onChange={e => e.target.files[0] && upload(e.target.files[0], "audio")} />
+      </div>
     </div>
   );
 }
@@ -124,7 +209,7 @@ function AutoReplies({ notify }) {
   const [replies, setReplies] = useState([]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ trigger: "", response: "", type: "exact", active: true });
+  const [form, setForm] = useState({ trigger: "", response: "", type: "exact", active: true, image_url: null, audio_url: null });
   const [editId, setEditId] = useState(null);
 
   const load = useCallback(async () => {
@@ -149,7 +234,7 @@ function AutoReplies({ notify }) {
         await axios.post(`${API}/auto-replies`, form);
         notify("Auto-réponse ajoutée !", "success");
       }
-      setForm({ trigger: "", response: "", type: "exact", active: true });
+      setForm({ trigger: "", response: "", type: "exact", active: true, image_url: null, audio_url: null });
       setShowForm(false);
       setEditId(null);
       load();
@@ -169,7 +254,7 @@ function AutoReplies({ notify }) {
   };
 
   const startEdit = (r) => {
-    setForm({ trigger: r.trigger, response: r.response, type: r.type, active: r.active });
+    setForm({ trigger: r.trigger, response: r.response, type: r.type, active: r.active, image_url: r.image_url || null, audio_url: r.audio_url || null });
     setEditId(r.id);
     setShowForm(true);
   };
@@ -183,7 +268,7 @@ function AutoReplies({ notify }) {
         </div>
         <button
           data-testid="add-autoreply-btn"
-          onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ trigger: "", response: "", type: "exact", active: true }); }}
+          onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ trigger: "", response: "", type: "exact", active: true, image_url: null, audio_url: null }); }}
           className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200"
         >
           <Plus size={16} /> Ajouter
@@ -219,7 +304,7 @@ function AutoReplies({ notify }) {
             </div>
           </div>
           <div>
-            <label className="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Réponse</label>
+            <label className="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Réponse texte</label>
             <textarea
               data-testid="autoreply-response-input"
               value={form.response} onChange={e => setForm({ ...form, response: e.target.value })}
@@ -228,6 +313,11 @@ function AutoReplies({ notify }) {
               className="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono resize-none"
             />
           </div>
+          <MediaUploader
+            imageUrl={form.image_url} audioUrl={form.audio_url}
+            onImageChange={url => setForm({ ...form, image_url: url })}
+            onAudioChange={url => setForm({ ...form, audio_url: url })}
+          />
           <div className="flex gap-3">
             <button type="submit" data-testid="autoreply-submit-btn" className="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200 flex items-center gap-2">
               <Check size={14} /> {editId ? "Modifier" : "Ajouter"}
@@ -260,6 +350,8 @@ function AutoReplies({ notify }) {
                 <span className="font-mono text-sm text-white font-bold">"{r.trigger}"</span>
                 <span className="font-mono text-xs px-1.5 py-0.5 border border-white/10 text-zinc-500">{TYPE_LABELS[r.type]}</span>
                 {!r.active && <span className="font-mono text-xs text-zinc-600">[inactif]</span>}
+                {r.image_url && <Image size={13} className="text-cyan-400" />}
+                {r.audio_url && <SpeakerHigh size={13} className="text-violet-400" />}
               </div>
               <p className="text-zinc-400 text-sm truncate">{r.response}</p>
             </div>
@@ -287,6 +379,8 @@ function BannedWords({ notify }) {
   const [words, setWords] = useState([]);
   const [tab, setTab] = useState("insultes");
   const [newWord, setNewWord] = useState("");
+  const [mediaForm, setMediaForm] = useState({ image_url: null, audio_url: null });
+  const [showMedia, setShowMedia] = useState(false);
 
   const load = useCallback(async () => {
     const r = await axios.get(`${API}/banned-words`);
@@ -303,9 +397,11 @@ function BannedWords({ notify }) {
     e.preventDefault();
     if (!newWord.trim()) return;
     try {
-      await axios.post(`${API}/banned-words`, { word: newWord.trim(), category: tab });
+      await axios.post(`${API}/banned-words`, { word: newWord.trim(), category: tab, ...mediaForm });
       notify(`"${newWord}" ajouté !`, "success");
       setNewWord("");
+      setMediaForm({ image_url: null, audio_url: null });
+      setShowMedia(false);
       load();
     } catch (err) {
       notify(err.response?.data?.detail || "Erreur", "error");
@@ -352,16 +448,32 @@ function BannedWords({ notify }) {
       </div>
 
       {/* Add form */}
-      <form onSubmit={handleAdd} className="flex gap-3" data-testid="banned-word-form">
-        <input
-          data-testid="banned-word-input"
-          value={newWord} onChange={e => setNewWord(e.target.value)}
-          placeholder={`Ajouter un mot (${tab})...`}
-          className="flex-1 bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono"
-        />
-        <button type="submit" data-testid="banned-word-add-btn" className="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200 flex items-center gap-2">
-          <Plus size={16} /> Ajouter
-        </button>
+      <form onSubmit={handleAdd} className="space-y-3" data-testid="banned-word-form">
+        <div className="flex gap-3">
+          <input
+            data-testid="banned-word-input"
+            value={newWord} onChange={e => setNewWord(e.target.value)}
+            placeholder={`Ajouter un mot (${tab})...`}
+            className="flex-1 bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono"
+          />
+          <button type="button" onClick={() => setShowMedia(s => !s)} title="Ajouter image/son"
+            className={`px-3 py-2 border text-sm transition-colors duration-200 ${showMedia ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10" : "border-white/10 text-zinc-500 hover:text-zinc-300"}`}>
+            <Image size={16} />
+          </button>
+          <button type="submit" data-testid="banned-word-add-btn" className="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200 flex items-center gap-2">
+            <Plus size={16} /> Ajouter
+          </button>
+        </div>
+        {showMedia && (
+          <div className="p-4 border border-white/5 bg-[#0B0B10]">
+            <p className="font-mono text-xs text-zinc-500 uppercase tracking-widest mb-3">Media pour ce mot banni</p>
+            <MediaUploader
+              imageUrl={mediaForm.image_url} audioUrl={mediaForm.audio_url}
+              onImageChange={url => setMediaForm({ ...mediaForm, image_url: url })}
+              onAudioChange={url => setMediaForm({ ...mediaForm, audio_url: url })}
+            />
+          </div>
+        )}
       </form>
 
       {/* List */}
@@ -370,6 +482,8 @@ function BannedWords({ notify }) {
         {current.map(w => (
           <div key={w.id} className={`group flex items-center gap-2 px-3 py-1.5 border font-mono text-sm ${tab === "insultes" ? "border-red-500/20 bg-red-500/5 text-red-300" : "border-amber-500/20 bg-amber-500/5 text-amber-300"}`}>
             {w.word}
+            {w.image_url && <Image size={11} className="text-cyan-400 opacity-70" />}
+            {w.audio_url && <SpeakerHigh size={11} className="text-violet-400 opacity-70" />}
             <button onClick={() => handleDelete(w.id, w.word)} data-testid={`delete-word-${w.id}`} className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:text-white ml-1">
               <X size={12} />
             </button>
@@ -386,7 +500,7 @@ function Commands({ notify }) {
   const [commands, setCommands] = useState([]);
   const [filter, setFilter] = useState("Tous");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ command: "", description: "", category: "Fun", emoji: "🤖", active: true });
+  const [form, setForm] = useState({ command: "", description: "", category: "Fun", emoji: "🤖", active: true, image_url: null, audio_url: null });
   const [editId, setEditId] = useState(null);
 
   const load = useCallback(async () => {
@@ -409,7 +523,7 @@ function Commands({ notify }) {
         await axios.post(`${API}/commands`, form);
         notify("Commande ajoutée !", "success");
       }
-      setForm({ command: "", description: "", category: "Fun", emoji: "🤖", active: true });
+      setForm({ command: "", description: "", category: "Fun", emoji: "🤖", active: true, image_url: null, audio_url: null });
       setShowForm(false);
       setEditId(null);
       load();
@@ -429,7 +543,7 @@ function Commands({ notify }) {
   };
 
   const startEdit = (c) => {
-    setForm({ command: c.command, description: c.description, category: c.category, emoji: c.emoji, active: c.active });
+    setForm({ command: c.command, description: c.description, category: c.category, emoji: c.emoji, active: c.active, image_url: c.image_url || null, audio_url: c.audio_url || null });
     setEditId(c.id);
     setShowForm(true);
   };
@@ -443,7 +557,7 @@ function Commands({ notify }) {
         </div>
         <button
           data-testid="add-command-btn"
-          onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ command: "", description: "", category: "Fun", emoji: "🤖", active: true }); }}
+          onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ command: "", description: "", category: "Fun", emoji: "🤖", active: true, image_url: null, audio_url: null }); }}
           className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200"
         >
           <Plus size={16} /> Nouvelle commande
@@ -493,6 +607,11 @@ function Commands({ notify }) {
               {["IA", "Fun", "Jeux", "Utile"].map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          <MediaUploader
+            imageUrl={form.image_url} audioUrl={form.audio_url}
+            onImageChange={url => setForm({ ...form, image_url: url })}
+            onAudioChange={url => setForm({ ...form, audio_url: url })}
+          />
           <div className="flex gap-3">
             <button type="submit" data-testid="command-submit-btn" className="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors duration-200 flex items-center gap-2">
               <Check size={14} /> {editId ? "Modifier" : "Ajouter"}
@@ -528,6 +647,8 @@ function Commands({ notify }) {
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-mono text-sm text-white">{c.command}</span>
                 <Badge category={c.category} />
+                {c.image_url && <Image size={13} className="text-cyan-400" />}
+                {c.audio_url && <SpeakerHigh size={13} className="text-violet-400" />}
               </div>
               <p className="text-zinc-400 text-sm">{c.description}</p>
             </div>
