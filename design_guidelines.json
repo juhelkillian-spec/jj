@@ -1,0 +1,111 @@
+{
+  "theme_and_archetype": {
+    "domain": "WhatsApp Bot Admin Panel",
+    "theme": "DARK",
+    "archetype": "7 (Electric & Neon)",
+    "description": "A high-end 'Retro-Futurism' tech dashboard designed for French students (CROUS). Focuses on a 'command center' aesthetic with deep blacks, subtle grid structures, and electric neon accents (nodding to WhatsApp's green but elevated to cyber-tech). Feels like an elite gaming hub."
+  },
+  "typography": {
+    "heading_font": "Unbounded",
+    "body_font": "Manrope",
+    "mono_font": "JetBrains Mono",
+    "rules": {
+      "H1": "text-4xl sm:text-5xl font-black tracking-tighter leading-none",
+      "H2": "text-2xl sm:text-3xl font-bold tracking-tight leading-tight",
+      "H3": "text-xl sm:text-2xl font-bold tracking-tight",
+      "H4": "text-lg sm:text-xl font-semibold",
+      "body": "text-base leading-relaxed text-[#A1A1AA]",
+      "labels_overlines": "font-mono text-xs uppercase tracking-[0.2em] text-[#A1A1AA]",
+      "code_logs": "font-mono text-sm leading-relaxed"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#030305",
+      "container": "#0B0B10",
+      "glass": "rgba(11, 11, 16, 0.7)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A"
+    },
+    "accents": {
+      "primary": "#10B981",
+      "primary_glow": "rgba(16, 185, 129, 0.5)",
+      "secondary": "#06B6D4",
+      "warning": "#F59E0B",
+      "danger": "#EF4444"
+    },
+    "borders": {
+      "default": "rgba(255, 255, 255, 0.08)",
+      "hover": "rgba(255, 255, 255, 0.15)",
+      "active": "#10B981"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous spacing combined with a dense 'Control Room' grid for dashboard widgets.",
+    "dashboard_grid": {
+      "mode": "MODE B: THE 'CONTROL ROOM' GRID",
+      "base": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+      "spans": {
+        "summary_metric": "col-span-1",
+        "main_chart": "col-span-2 lg:col-span-3 row-span-2",
+        "feed_list": "col-span-1 lg:col-span-1 row-span-2"
+      }
+    },
+    "padding_scale": "Containers use p-6 or p-8 to prevent text collision. Sub-elements use p-4."
+  },
+  "surface_styles": {
+    "cards": "Grid Borders: Flat background (#0B0B10), 1px subtle border (border-white/5), no shadow. On hover: slight lift (-translate-y-1) and subtle border brighten.",
+    "terminal_logs": "Retro-Futurism: Deep black background (#000000), neon green borders (border-[#10B981]/50), subtle green drop-shadow on text.",
+    "sidebar": "Glassmorphism: bg-[#0B0B10]/70 backdrop-blur-xl border-r border-white/5.",
+    "active_buttons": "The Tracing Beam: Dark background with a glowing 1px neon green border and a soft blur behind."
+  },
+  "motion_and_interaction": {
+    "hover_states": "All interactive elements must explicitly set hover states (e.g., hover:bg-white/5 hover:text-white).",
+    "focus_states": "High contrast: focus:ring-2 focus:ring-[#10B981]/50 focus:outline-none.",
+    "transitions": "Use specific properties (transition-colors duration-200 ease-in-out, transition-transform duration-200 ease-out)."
+  },
+  "component_rules": {
+    "buttons": "Neumorphism mix: Sharp 1px border. Primary CTA uses bg-[#10B981] text-black font-bold hover:bg-[#059669]. Secondary uses bg-transparent border border-white/10 text-white hover:border-white/30.",
+    "forms_inputs": "Shadcn based. bg-[#030305] border-white/10 text-white focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981].",
+    "tables_lists": "Border-collapse layout. border-b border-white/5 for rows. Text left-aligned.",
+    "badges": "bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/30 text-xs font-mono uppercase tracking-wider rounded-none px-2 py-1."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "user_avatar",
+        "url": "https://images.pexels.com/photos/7849511/pexels-photo-7849511.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Student gamer avatar for the profile section"
+      },
+      {
+        "category": "abstract_background",
+        "url": "https://images.unsplash.com/photo-1762278804729-13d330fad71a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHwxfHxjeWJlcnB1bmslMjB0ZWNoJTIwYmFja2dyb3VuZCUyMGRhcmt8ZW58MHx8fHwxNzc1NjI2MTUwfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark abstract tech background (use as subtle low-opacity overlay or banner if needed)"
+      }
+    ],
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "install_command": "yarn add @phosphor-icons/react",
+      "style": "Clean, dense dashboard icons. Use Duotone weight for active elements."
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text meets WCAG AA standards against #030305 and #0B0B10.",
+    "testing_attributes": "All interactive elements must include `data-testid` attribute (e.g., data-testid='add-command-btn')."
+  },
+  "instructions_to_main_agent": [
+    "Install and configure 'Unbounded', 'Manrope', and 'JetBrains Mono' fonts via Google Fonts in the global CSS or layout file.",
+    "Use Tailwind CSS for all layout and styling. Do not use plain CSS unless absolutely necessary.",
+    "Use Shadcn UI components for Tables, Dialogs, Select, Inputs, but HEAVILY customize them to match the Dark Tech/Neon Green aesthetic defined here. Strip out the 'default Vercel look'.",
+    "Implement the 'Control Room Grid' for the main overview page. Use dense spacing and 1px borders.",
+    "Use pure HTML + Tailwind for the macro layout (Sidebar + Main Content area).",
+    "The 'Journal d'activité' (Activity Log) must use the 'Retro-Futurism' terminal styling (JetBrains Mono font, subtle green borders, pure black background).",
+    "Translate all interface text to French as requested (e.g., 'Vue d\\'ensemble', 'Auto-Réponses', 'Mots Bannis', 'Commandes', 'Paramètres').",
+    "Do not use whatsapp-web.js in the frontend. Ensure the backend handles all WhatsApp logic, while the frontend remains a pure management dashboard.",
+    "For Recharts (if used for stats), use the accent colors (#10B981, #06B6D4) and disable grid lines, or make them extremely faint (stroke='rgba(255,255,255,0.05)').",
+    "All .js/jsx files must follow these guidelines since the project does not use TypeScript (.tsx)."
+  ]
+}
