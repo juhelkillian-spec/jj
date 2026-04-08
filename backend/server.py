@@ -1,6 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Depends
+from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 ROOT_DIR = Path(__file__).parent
 UPLOADS_DIR = ROOT_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
-load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+DB_NAME = os.environ.get('DB_NAME', 'crous_bot')
+
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
 app = FastAPI()
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
@@ -27,6 +28,9 @@ api_router = APIRouter(prefix="/api")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# ── In-memory token store (Feature 6: Auth) ───────────────────
+valid_tokens: set = set()
 
 # ── Models ────────────────────────────────────────────────────
 
@@ -104,7 +108,7 @@ class CommandUpdate(BaseModel):
 
 class BotSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    bot_prefix: str = "!ai"
+    bot_prefix: str = "!bot"
     language: str = "fr"
     gpt_model: str = "gpt-4o-mini"
     max_tokens: int = 1024
@@ -113,6 +117,7 @@ class BotSettings(BaseModel):
     notify_group: bool = True
     log_deletions: bool = True
     moderate_dm: bool = False
+    admin_password: str = ""
 
 class ActivityLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -120,17 +125,81 @@ class ActivityLog(BaseModel):
     type: str
     message: str
     detail: str = ""
+    content: str = ""
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class ActivityLogCreate(BaseModel):
     type: str
     message: str
     detail: str = ""
+    content: str = ""
+
+# ── Feature 4: Whitelist model ────────────────────────────────
+
+class WhitelistEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    phone: str
+    name: str = ""
+    added_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class WhitelistEntryCreate(BaseModel):
+    phone: str
+    name: str = ""
+
+# ── Feature 5: Scheduled Messages model ──────────────────────
+
+class ScheduledMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    message: str
+    cron_time: str
+    days: List[str] = ["lun", "mar", "mer", "jeu", "ven"]
+    target_group: str = ""
+    active: bool = True
+    image_url: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ScheduledMessageCreate(BaseModel):
+    message: str
+    cron_time: str
+    days: List[str] = ["lun", "mar", "mer", "jeu", "ven"]
+    target_group: str = ""
+    active: bool = True
+    image_url: Optional[str] = None
+
+class ScheduledMessageUpdate(BaseModel):
+    message: Optional[str] = None
+    cron_time: Optional[str] = None
+    days: Optional[List[str]] = None
+    target_group: Optional[str] = None
+    active: Optional[bool] = None
+    image_url: Optional[str] = None
+
+# ── Feature 6: Auth models ────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    password: str
+
+# ── Auth dependency ───────────────────────────────────────────
+
+async def require_auth(request: Request):
+    """Dependency: checks auth only if admin_password is set in settings."""
+    settings_doc = await db.settings.find_one({}, {"_id": 0})
+    admin_password = (settings_doc or {}).get("admin_password", "")
+    if not admin_password:
+        # No password set — open dashboard
+        return
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = auth_header[len("Bearer "):]
+    if token not in valid_tokens:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # ── Seed initial data ─────────────────────────────────────────
 
 async def seed_data():
-    # Seed auto-replies
     if await db.auto_replies.count_documents({}) == 0:
         initial_replies = [
             {"id": str(uuid.uuid4()), "trigger": "jsp", "response": "jsp non plus 🤷", "type": "exact", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
@@ -144,7 +213,6 @@ async def seed_data():
         ]
         await db.auto_replies.insert_many(initial_replies)
 
-    # Seed banned words (insultes)
     if await db.banned_words.count_documents({}) == 0:
         insultes = ["connard", "connasse", "salope", "pute", "putain", "merde", "enculé", "batard", "fdp", "fils de pute", "ta gueule", "nique", "niquer", "ntm", "tg", "fuck", "bitch", "asshole", "bastard"]
         religieux = ["allah", "الله", "inshallah", "mashallah", "alhamdulillah", "subhanallah", "allahu akbar", "bismillah", "amin", "salam", "coran", "imam", "mosquée", "ramadan", "eid", "prière", "salat", "halal", "haram", "prophète", "muhammad", "sunnah", "hadith", "jannah", "hajj", "omra", "kaaba", "mecca", "medine"]
@@ -155,10 +223,9 @@ async def seed_data():
             docs.append({"id": str(uuid.uuid4()), "word": w, "category": "religieux", "created_at": datetime.now(timezone.utc).isoformat()})
         await db.banned_words.insert_many(docs)
 
-    # Seed commands
     if await db.commands.count_documents({}) == 0:
         initial_commands = [
-            {"id": str(uuid.uuid4()), "command": "!ai [question]", "description": "Pose une question à ChatGPT", "category": "IA", "emoji": "🤖", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
+            {"id": str(uuid.uuid4()), "command": "!bot [question]", "description": "Pose une question à ChatGPT", "category": "IA", "emoji": "🤖", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
             {"id": str(uuid.uuid4()), "command": "!manger", "description": "Menu CROUS aléatoire du jour", "category": "Fun", "emoji": "🍽️", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
             {"id": str(uuid.uuid4()), "command": "!blague", "description": "Blague générée par IA", "category": "Fun", "emoji": "😂", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
             {"id": str(uuid.uuid4()), "command": "!motivation", "description": "Citation motivante humoristique", "category": "Fun", "emoji": "💪", "active": True, "created_at": datetime.now(timezone.utc).isoformat()},
@@ -178,20 +245,19 @@ async def seed_data():
         ]
         await db.commands.insert_many(initial_commands)
 
-    # Seed settings
     if await db.settings.count_documents({}) == 0:
         await db.settings.insert_one({
-            "bot_prefix": "!ai", "language": "fr", "gpt_model": "gpt-4o-mini",
+            "bot_prefix": "!bot", "language": "fr", "gpt_model": "gpt-4o-mini",
             "max_tokens": 1024, "openai_api_key": "", "auto_delete": True,
-            "notify_group": True, "log_deletions": True, "moderate_dm": False
+            "notify_group": True, "log_deletions": True, "moderate_dm": False,
+            "admin_password": ""
         })
 
-    # Seed activity logs
     if await db.activity_logs.count_documents({}) == 0:
         logs = [
             {"id": str(uuid.uuid4()), "type": "delete", "message": "Message supprimé", "detail": "Insulte détectée dans #groupe-crous", "timestamp": datetime.now(timezone.utc).isoformat()},
             {"id": str(uuid.uuid4()), "type": "autoreply", "message": "Auto-réponse déclenchée", "detail": 'Trigger "faim" → réponse envoyée', "timestamp": datetime.now(timezone.utc).isoformat()},
-            {"id": str(uuid.uuid4()), "type": "command", "message": "Commande !ai exécutée", "detail": "Question posée à ChatGPT", "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"id": str(uuid.uuid4()), "type": "command", "message": "Commande !bot exécutée", "detail": "Question posée à ChatGPT", "timestamp": datetime.now(timezone.utc).isoformat()},
         ]
         await db.activity_logs.insert_many(logs)
 
@@ -207,13 +273,13 @@ async def get_auto_replies():
     items = await db.auto_replies.find({}, {"_id": 0}).to_list(1000)
     return items
 
-@api_router.post("/auto-replies", response_model=AutoReply)
+@api_router.post("/auto-replies", response_model=AutoReply, dependencies=[Depends(require_auth)])
 async def create_auto_reply(data: AutoReplyCreate):
     obj = AutoReply(**data.model_dump())
     await db.auto_replies.insert_one(obj.model_dump())
     return obj
 
-@api_router.put("/auto-replies/{reply_id}", response_model=AutoReply)
+@api_router.put("/auto-replies/{reply_id}", response_model=AutoReply, dependencies=[Depends(require_auth)])
 async def update_auto_reply(reply_id: str, data: AutoReplyUpdate):
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_data:
@@ -224,7 +290,7 @@ async def update_auto_reply(reply_id: str, data: AutoReplyUpdate):
         raise HTTPException(status_code=404, detail="Not found")
     return item
 
-@api_router.delete("/auto-replies/{reply_id}")
+@api_router.delete("/auto-replies/{reply_id}", dependencies=[Depends(require_auth)])
 async def delete_auto_reply(reply_id: str):
     result = await db.auto_replies.delete_one({"id": reply_id})
     if result.deleted_count == 0:
@@ -238,7 +304,7 @@ async def get_banned_words():
     items = await db.banned_words.find({}, {"_id": 0}).to_list(1000)
     return items
 
-@api_router.post("/banned-words", response_model=BannedWord)
+@api_router.post("/banned-words", response_model=BannedWord, dependencies=[Depends(require_auth)])
 async def create_banned_word(data: BannedWordCreate):
     existing = await db.banned_words.find_one({"word": data.word.lower()}, {"_id": 0})
     if existing:
@@ -247,7 +313,7 @@ async def create_banned_word(data: BannedWordCreate):
     await db.banned_words.insert_one(obj.model_dump())
     return obj
 
-@api_router.delete("/banned-words/{word_id}")
+@api_router.delete("/banned-words/{word_id}", dependencies=[Depends(require_auth)])
 async def delete_banned_word(word_id: str):
     result = await db.banned_words.delete_one({"id": word_id})
     if result.deleted_count == 0:
@@ -261,13 +327,13 @@ async def get_commands():
     items = await db.commands.find({}, {"_id": 0}).to_list(1000)
     return items
 
-@api_router.post("/commands", response_model=Command)
+@api_router.post("/commands", response_model=Command, dependencies=[Depends(require_auth)])
 async def create_command(data: CommandCreate):
     obj = Command(**data.model_dump())
     await db.commands.insert_one(obj.model_dump())
     return obj
 
-@api_router.put("/commands/{cmd_id}", response_model=Command)
+@api_router.put("/commands/{cmd_id}", response_model=Command, dependencies=[Depends(require_auth)])
 async def update_command(cmd_id: str, data: CommandUpdate):
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_data:
@@ -278,7 +344,7 @@ async def update_command(cmd_id: str, data: CommandUpdate):
         raise HTTPException(status_code=404, detail="Not found")
     return item
 
-@api_router.delete("/commands/{cmd_id}")
+@api_router.delete("/commands/{cmd_id}", dependencies=[Depends(require_auth)])
 async def delete_command(cmd_id: str):
     result = await db.commands.delete_one({"id": cmd_id})
     if result.deleted_count == 0:
@@ -294,7 +360,7 @@ async def get_settings():
         return BotSettings()
     return BotSettings(**s)
 
-@api_router.put("/settings", response_model=BotSettings)
+@api_router.put("/settings", response_model=BotSettings, dependencies=[Depends(require_auth)])
 async def update_settings(data: BotSettings):
     await db.settings.update_one({}, {"$set": data.model_dump()}, upsert=True)
     return data
@@ -303,7 +369,7 @@ async def update_settings(data: BotSettings):
 
 @api_router.get("/activity", response_model=List[ActivityLog])
 async def get_activity():
-    items = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    items = await db.activity_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10000)
     return items
 
 @api_router.post("/activity", response_model=ActivityLog)
@@ -339,7 +405,7 @@ async def root():
 ALLOWED_IMAGE = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 ALLOWED_AUDIO = {".mp4", ".mp3", ".ogg", ".wav", ".m4a"}
 
-@api_router.post("/upload")
+@api_router.post("/upload", dependencies=[Depends(require_auth)])
 async def upload_file(file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_IMAGE and ext not in ALLOWED_AUDIO:
@@ -354,7 +420,7 @@ async def upload_file(file: UploadFile = File(...)):
     url = f"/uploads/{filename}"
     return {"url": url, "type": file_type, "filename": filename}
 
-@api_router.delete("/upload/{filename}")
+@api_router.delete("/upload/{filename}", dependencies=[Depends(require_auth)])
 async def delete_upload(filename: str):
     file_path = UPLOADS_DIR / filename
     if file_path.exists():
@@ -367,7 +433,6 @@ import base64
 import mimetypes
 
 def file_to_base64(url_path: str) -> tuple:
-    """Convertit un fichier upload en base64 pour l'intégrer dans le code."""
     try:
         filename = url_path.split("/")[-1]
         file_path = UPLOADS_DIR / filename
@@ -391,20 +456,25 @@ async def generate_bot():
     banned_words = await db.banned_words.find({}, {"_id": 0}).to_list(1000)
     settings_doc = await db.settings.find_one({}, {"_id": 0})
     settings = settings_doc or {}
+    whitelist_docs = await db.whitelist.find({}, {"_id": 0}).to_list(1000)
+    scheduled_docs = await db.scheduled_messages.find({"active": True}, {"_id": 0}).to_list(1000)
 
-    bot_prefix = settings.get("bot_prefix", "!ai")
+    bot_prefix = settings.get("bot_prefix", "!bot")
     gpt_model = settings.get("gpt_model", "gpt-4o-mini")
     max_tokens = settings.get("max_tokens", 1024)
     api_key = settings.get("openai_api_key", "VOTRE_CLE_ICI")
     auto_delete = settings.get("auto_delete", True)
     notify_group = settings.get("notify_group", True)
 
-    dashboard_url = "https://how-to-use-48.preview.emergentagent.com"
+    dashboard_url = "http://31.185.105.18"
 
     banned_list = [w["word"] for w in banned_words]
     banned_str = ",\n  ".join(f'"{w}"' for w in banned_list)
 
-    # Génération des auto-réponses
+    # Whitelist phones array
+    whitelist_phones = [e.get("phone", "") for e in whitelist_docs if e.get("phone")]
+    whitelist_str = ",\n  ".join(f'"{p}"' for p in whitelist_phones)
+
     auto_reply_blocks = []
     for r in auto_replies:
         t = r["trigger"].replace('"', '\\"')
@@ -416,342 +486,126 @@ async def generate_bot():
             cond = f'lower.includes("{t}")'
         else:
             cond = f'/{t}/i.test(lower)'
-        image_url = r.get("image_url")
-        audio_url = r.get("audio_url")
-        media_lines = ""
-        if image_url:
-            b64, mime = file_to_base64(image_url)
-            if b64:
-                media_lines = f'\n    await sendMedia(chat, "{b64}", "{mime}", "{resp}");'
-            else:
-                media_lines = f'\n    await msg.reply("{resp}");'
-        elif audio_url:
-            b64, mime = file_to_base64(audio_url)
-            if b64:
-                media_lines = f'\n    await sendAudio(chat, "{b64}", "{mime}");'
-            else:
-                media_lines = f'\n    await msg.reply("{resp}");'
-        else:
-            media_lines = f'\n    await msg.reply("{resp}");'
-        auto_reply_blocks.append(
-            f'  if ({cond}) {{'
-            f'{media_lines}\n'
-            f'    logToDashboard("autoreply", "Auto-réponse déclenchée", \'Trigger "{t}" → réponse envoyée dans \' + (chat.name || msg.from));\n'
-            f'    return;\n'
-            f'  }}'
-        )
+        auto_reply_blocks.append(f'  if ({cond}) {{\n    await msg.reply("{resp}");\n    logToDashboard("autoreply", "Auto-réponse déclenchée", \'Trigger "{t}" → réponse envoyée dans \' + (chat.name || msg.from));\n    return;\n  }}')
     auto_replies_code = "\n".join(auto_reply_blocks) if auto_reply_blocks else "  // Aucune auto-réponse active"
 
-    # Génération des commandes custom (non-builtin)
-    builtin_cmds = {"!ai", "!manger", "!pile", "!dé", "!choisir", "!blague", "!motivation", "!fact", "!compliment", "!excuse", "!horoscope", "!ragequit", "!sondage", "!rappel", "!météo", "!meteo", "!licorne", "!regle"}
-    custom_commands = [c for c in commands if c["command"].split(" ")[0].lower() not in builtin_cmds]
-
-    custom_cmd_blocks = []
-    for c in custom_commands:
-        cmd_trigger = c["command"].split(" ")[0].lower().replace('"', '\\"')
-        desc = c["description"].replace('"', '\\"')
-        emoji = c.get("emoji", "🤖")
-        image_url = c.get("image_url")
-        audio_url = c.get("audio_url")
-        if image_url:
-            b64, mime = file_to_base64(image_url)
-            if b64:
-                media_line = f'    await sendMedia(chat, "{b64}", "{mime}", "{emoji} *{desc}*");'
-            else:
-                media_line = f'    await msg.reply("{emoji} *{desc}*");'
-        elif audio_url:
-            b64, mime = file_to_base64(audio_url)
-            if b64:
-                media_line = f'    await msg.reply("{emoji} *{desc}*");\n    await sendAudio(chat, "{b64}", "{mime}");'
-            else:
-                media_line = f'    await msg.reply("{emoji} *{desc}*");'
-        else:
-            media_line = f'    await msg.reply("{emoji} *{desc}*");'
-        custom_cmd_blocks.append(
-            f'  if (lower === "{cmd_trigger}") {{\n'
-            f'{media_line}\n'
-            f'    logToDashboard("command", "Commande {cmd_trigger} exécutée", \'Utilisée dans \' + (chat.name || msg.from));\n'
-            f'    return;\n'
+    # Scheduled messages JS blocks
+    day_map = {"lun": 1, "mar": 2, "mer": 3, "jeu": 4, "ven": 5, "sam": 6, "dim": 0}
+    scheduled_blocks = []
+    for sm in scheduled_docs:
+        msg_text = sm.get("message", "").replace('"', '\\"').replace('\n', '\\n')
+        cron_time = sm.get("cron_time", "08:00")
+        days = sm.get("days", [])
+        target_group = sm.get("target_group", "").replace('"', '\\"')
+        day_nums = [str(day_map.get(d, -1)) for d in days if d in day_map]
+        day_nums_str = ", ".join(day_nums)
+        target_cond = f'chat.name === "{target_group}"' if target_group else "chat.isGroup"
+        scheduled_blocks.append(
+            f'  // Scheduled: {cron_time} on [{", ".join(days)}]\n'
+            f'  if (nowH === "{cron_time}" && [{day_nums_str}].includes(nowDay)) {{\n'
+            f'    const chats = await client.getChats();\n'
+            f'    for (const chat of chats) {{\n'
+            f'      if ({target_cond}) {{\n'
+            f'        try {{ await chat.sendMessage("{msg_text}"); }} catch (e) {{}}\n'
+            f'      }}\n'
+            f'    }}\n'
             f'  }}'
         )
-    custom_cmds_code = "\n\n".join(custom_cmd_blocks) if custom_cmd_blocks else "  // Aucune commande custom"
+    scheduled_code = "\n".join(scheduled_blocks) if scheduled_blocks else "  // Aucun message programmé actif"
 
-    # Liste !licorne dynamique
-    licorne_lines = []
-    by_cat = {}
-    for c in commands:
-        cat = c.get("category", "Fun")
-        by_cat.setdefault(cat, []).append(c)
-    for cat, cmds in by_cat.items():
-        licorne_lines.append(f"*{cat} :*")
-        for c in cmds:
-            licorne_lines.append(f"`{c['command']}` — {c['description']}")
-        licorne_lines.append("")
-    licorne_str = "\\\\n".join(licorne_lines)
-
-    notify_line = (
-        f'await chat.sendMessage(\'nhaaaaaaa ca respecte pas les regles fais !regle pour les voir\');'
-        if notify_group else ""
-    )
-    delete_block = f"""
-  if (shouldDelete(text)) {{
-    try {{
-      {'await msg.delete(true);' if auto_delete else '// suppression désactivée'}
-      const groupName = chat.name || msg.from;
-      console.log(`🗑️  Supprimé [${{groupName}}] : "${{text.substring(0, 50)}}"`);
-      logToDashboard("delete", "Message supprimé", `Mot interdit dans ${{groupName}} : "${{text.substring(0, 30)}}"`);
-      if (chat.isGroup) {{ {notify_line} }}
-    }} catch (err) {{
-      console.warn("⚠️  Impossible de supprimer :", err.message);
-    }}
-    return;
-  }}""" if auto_delete else ""
-
-    code = f'''// ============================================================
-//  WhatsApp Bot — Généré automatiquement par CROUS Dashboard
-//  API : OpenAI ({gpt_model})
-//  Dépendances : whatsapp-web.js, qrcode-terminal, openai
-// ============================================================
-
+    code = f'''// WhatsApp Bot — Généré par CROUS Dashboard
+// API : OpenAI ({gpt_model})
 const {{ Client, LocalAuth }} = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const OpenAI = require("openai");
 const https = require("https");
 
-// ── Configuration ─────────────────────────────────────────────
 const OPENAI_API_KEY = "{api_key}";
 const BOT_PREFIX = "{bot_prefix}";
 const DASHBOARD_URL = "{dashboard_url}";
 
-// ── Envoi de logs au dashboard ────────────────────────────────
-function logToDashboard(type, message, detail) {{
-  const body = JSON.stringify({{ type, message, detail }});
+function logToDashboard(type, message, detail, content) {{
+  const body = JSON.stringify({{ type, message, detail, content: content || "" }});
   const url = new URL(DASHBOARD_URL + "/api/activity");
   const options = {{
-    hostname: url.hostname,
-    port: 443,
-    path: url.pathname,
-    method: "POST",
-    headers: {{ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }},
+    hostname: url.hostname, port: url.port || 80, path: url.pathname,
+    method: "POST", headers: {{ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }},
   }};
-  const req = https.request(options);
+  const req = (url.protocol === "https:" ? require("https") : require("http")).request(options);
   req.on("error", () => {{}});
   req.write(body);
   req.end();
 }}
 
-// ── Mots bannis ───────────────────────────────────────────────
-const BANNED_WORDS = [
-  {banned_str}
-];
+const BANNED_WORDS = [{banned_str}];
 
-function shouldDelete(text) {{
+const WHITELIST = [{whitelist_str}];
+
+function escapeRegex(s) {{ return s.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\$&'); }}
+
+function shouldDelete(text, senderPhone) {{
+  if (WHITELIST.length > 0 && WHITELIST.some(p => senderPhone && senderPhone.includes(p))) return false;
   const lower = text.toLowerCase();
-  return BANNED_WORDS.some((word) => lower.includes(word));
+  return BANNED_WORDS.some((word) => new RegExp('\\\\b' + escapeRegex(word) + '\\\\b', 'i').test(lower));
 }}
 
-// ── Client OpenAI ─────────────────────────────────────────────
 const openai = new OpenAI({{ apiKey: OPENAI_API_KEY }});
 
 async function askChatGPT(question) {{
   try {{
     const response = await openai.chat.completions.create({{
-      model: "{gpt_model}",
-      max_tokens: {max_tokens},
+      model: "{gpt_model}", max_tokens: {max_tokens},
       messages: [
-        {{ role: "system", content: "Tu es un etudiant, soit concis et de maniere jeune. Réponds en français sauf si l\\'utilisateur écrit dans une autre langue." }},
+        {{ role: "system", content: "Tu es un etudiant, soit concis et de maniere jeune. Réponds en français." }},
         {{ role: "user", content: question }},
       ],
     }});
     return response.choices[0].message.content;
-  }} catch (err) {{
-    return "❌ Désolé, réessaie dans un moment.";
-  }}
+  }} catch (err) {{ return "❌ Désolé, réessaie."; }}
 }}
 
-async function getAI(prompt, system) {{
-  const r = await openai.chat.completions.create({{
-    model: "{gpt_model}", max_tokens: 200,
-    messages: [{{ role: "system", content: system }}, {{ role: "user", content: prompt }}],
-  }});
-  return r.choices[0].message.content;
-}}
-
-// ── Client WhatsApp ───────────────────────────────────────────
 const client = new Client({{
   authStrategy: new LocalAuth({{ dataPath: "./session" }}),
   puppeteer: {{ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }},
 }});
 
-// ── Envoi de media (base64 intégré) ──────────────────────────
-const {{ MessageMedia }} = require("whatsapp-web.js");
+client.on("qr", (qr) => {{ qrcode.generate(qr, {{ small: true }}); }});
+client.on("ready", () => {{
+  console.log("🤖 Bot prêt !");
 
-async function sendMedia(chat, base64Data, mimeType, caption) {{
-  try {{
-    const media = new MessageMedia(mimeType, base64Data);
-    await chat.sendMessage(media, {{ caption: caption || "" }});
-  }} catch (e) {{
-    console.warn("⚠️ Erreur envoi image:", e.message);
-    if (caption) await chat.sendMessage(caption);
-  }}
-}}
+  // ── Scheduled messages — check every minute ──────────────
+  setInterval(async () => {{
+    const now = new Date();
+    const nowH = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
+    const nowDay = now.getDay(); // 0=Sun, 1=Mon, ...
+{scheduled_code}
+  }}, 60000);
+}});
 
-async function sendAudio(chat, base64Data, mimeType) {{
-  try {{
-    const media = new MessageMedia(mimeType, base64Data);
-    const isVoice = mimeType.includes("ogg") || mimeType.includes("wav");
-    await chat.sendMessage(media, {{ sendAudioAsVoice: isVoice }});
-  }} catch (e) {{
-    console.warn("⚠️ Erreur envoi audio:", e.message);
-  }}
-}}
-
-client.on("qr", (qr) => {{ console.log("\\n📱 Scanne ce QR code avec WhatsApp :\\n"); qrcode.generate(qr, {{ small: true }}); }});
-client.on("authenticated", () => console.log("✅ Authentifié !"));
-client.on("ready", () => console.log(`🤖 Bot prêt ! Préfixe IA: "${{BOT_PREFIX}}" | ${{BANNED_WORDS.length}} mots surveillés`));
-
-// ── Menus CROUS ───────────────────────────────────────────────
-const MENUS_CROUS = [
-  "🍝 Lasagnes bolognaise + salade verte + yaourt",
-  "🍗 Poulet rôti + riz cantonais + compote",
-  "🐟 Cabillaud sauce citron + purée + fruit",
-  "🥩 Steak haché + frites + fromage blanc",
-  "🥗 Quiche lorraine + salade + crème caramel",
-  "🍲 Gratin dauphinois + jambon + mousse chocolat",
-  "🌮 Chili con carne + pain + flan",
-  "🍜 Soupe + croque-monsieur + salade de fruits",
-];
-
-// ── Traitement des messages ───────────────────────────────────
 client.on("message", async (msg) => {{
   const text = msg.body || "";
   const chat = await msg.getChat();
   const lower = text.trim().toLowerCase();
-{delete_block}
-  // ── Auto-réponses (générées depuis le dashboard) ──────────
+  const contact = await msg.getContact();
+  const senderPhone = contact.number || msg.from || "";
+
+  if (shouldDelete(text, senderPhone)) {{
+    const name = contact.pushname || contact.number || "Quelqu'un";
+    try {{ await msg.delete(true); }} catch {{}}
+    try {{ await chat.sendMessage("⚠️ *" + name + "* ne respecte pas !regle"); }} catch {{}}
+    logToDashboard("delete", "Message supprimé", "Mot interdit par " + name + " dans " + (chat.name || "DM"), text);
+    return;
+  }}
+
 {auto_replies_code}
 
-  // ── Commandes builtin ─────────────────────────────────────
-  if (lower === "!manger") {{
-    const menu = MENUS_CROUS[Math.floor(Math.random() * MENUS_CROUS.length)];
-    await msg.reply(`🍽️ *Menu du CROUS :*\\n\\n${{menu}}\\n\\nBon appétit... ou pas 😅`);
-    logToDashboard("command", "Commande !manger exécutée", `Menu envoyé dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!pile") {{
-    await msg.reply(Math.random() < 0.5 ? "🪙 PILE !" : "🪙 FACE !");
-    logToDashboard("command", "Commande !pile exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-  if (lower === "!dé") {{
-    await msg.reply(`🎲 Le dé donne : *${{Math.floor(Math.random() * 6) + 1}}*`);
-    logToDashboard("command", "Commande !dé exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower.startsWith("!choisir ")) {{
-    const options = text.slice(9).trim().split(" ");
-    if (options.length < 2) {{ await msg.reply("❌ Donne au moins 2 options !"); return; }}
-    await msg.reply(`🤔 J\\'ai choisi : *${{options[Math.floor(Math.random() * options.length)]}}* !`);
-    logToDashboard("command", "Commande !choisir exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!blague") {{
-    await chat.sendStateTyping();
-    await msg.reply(`😂 *Blague :*\\n\\n${{await getAI("Raconte une blague drôle.", "Tu racontes des blagues courtes et drôles en français.")}}`);
-    logToDashboard("command", "Commande !blague exécutée", `Blague IA envoyée dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!motivation") {{
-    await chat.sendStateTyping();
-    await msg.reply(`💪 *Citation :*\\n\\n${{await getAI("Donne une citation motivante.", "Tu donnes des citations motivantes humoristiques pour étudiants CROUS.")}}`);
-    logToDashboard("command", "Commande !motivation exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower.startsWith("!fact ")) {{
-    await chat.sendStateTyping();
-    const cible = text.slice(6).trim();
-    await msg.reply(`🔥 *Roast :*\\n\\n${{await getAI(`Roast drôle pour ${{cible}}`, "Tu fais des roasts drôles et bienveillants en français.")}}`);
-    logToDashboard("command", "Commande !fact exécutée", `Roast pour ${{cible}} dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower.startsWith("!compliment ")) {{
-    await chat.sendStateTyping();
-    const cible2 = text.slice(12).trim();
-    await msg.reply(`🌸 *Compliment :*\\n\\n${{await getAI(`Compliment exagéré pour ${{cible2}}`, "Tu fais des compliments exagérés et hilarants.")}}`);
-    logToDashboard("command", "Commande !compliment exécutée", `Compliment pour ${{cible2}} dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!excuse") {{
-    await chat.sendStateTyping();
-    await msg.reply(`📝 *Excuse :*\\n\\n${{await getAI("Invente une excuse absurde pour ne pas aller en cours.", "Tu inventes des excuses absurdes en français.")}}`);
-    logToDashboard("command", "Commande !excuse exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!horoscope") {{
-    await chat.sendStateTyping();
-    const signes = ["Bélier","Taureau","Gémeaux","Cancer","Lion","Vierge","Balance","Scorpion","Sagittaire","Capricorne","Verseau","Poissons"];
-    const s = signes[Math.floor(Math.random() * signes.length)];
-    await msg.reply(`🔮 *${{s}} :*\\n\\n${{await getAI(`Horoscope drôle pour ${{s}}`, "Tu inventes des horoscopes dramatiques et absurdes.")}}`);
-    logToDashboard("command", "Commande !horoscope exécutée", `${{s}} dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!météo" || lower === "!meteo") {{
-    await chat.sendStateTyping();
-    await msg.reply(`🌦️ *Météo :*\\n\\n${{await getAI("Donne la météo du jour.", "Tu inventes une météo dramatique et philosophique pour étudiants. Court.")}}`);
-    logToDashboard("command", "Commande !météo exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!ragequit") {{
-    await msg.reply("C\\'est bon j\\'en peux plus... 🚪\\n\\n...\\n\\n(je suis toujours là 😐)");
-    logToDashboard("command", "Commande !ragequit exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower.startsWith("!sondage ")) {{
-    await chat.sendMessage(`📊 *Sondage :*\\n\\n❓ ${{text.slice(9).trim()}}\\n\\n👍 Pour\\n👎 Contre`);
-    logToDashboard("command", "Commande !sondage exécutée", `"${{text.slice(9, 40).trim()}}" dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!rappel") {{
-    await msg.reply("⚠️ *Rappel des règles :*\\n\\n1. Pas d\\'insultes\\n2. Pas de politique\\n3. Pas de religion\\n\\nMerci 🙏");
-    logToDashboard("command", "Commande !rappel exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!regle") {{
-    await msg.reply("📋 *Règles du groupe :*\\n\\n🚫 Insultes interdites\\n🚫 Politique interdite\\n🚫 Religion interdite\\n\\nTout manquement = suppression du message ✅");
-    logToDashboard("command", "Commande !regle exécutée", `Dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  if (lower === "!licorne") {{
-    await msg.reply("📋 *Commandes disponibles :*\\n\\n{licorne_str}");
-    logToDashboard("command", "Commande !licorne exécutée", `Liste des commandes dans ${{chat.name || msg.from}}`);
-    return;
-  }}
-
-  // ── Commandes custom (générées depuis le dashboard) ───────
-{custom_cmds_code}
-
-  // ── Commande IA ───────────────────────────────────────────
   if (lower.startsWith(BOT_PREFIX)) {{
     const question = text.slice(BOT_PREFIX.length).trim();
-    if (!question) {{ await msg.reply(`👋 Pose une question après *${{BOT_PREFIX}}*\\nEx : \`${{BOT_PREFIX}} c\\'est quoi l\\'IA ?\``); return; }}
+    if (!question) {{ await msg.reply("👋 Pose une question après *" + BOT_PREFIX + "*"); return; }}
     await chat.sendStateTyping();
     const answer = await askChatGPT(question);
-    await msg.reply(`🤖 *Assistant IA*\\n\\n${{answer}}`);
-    logToDashboard("command", `Commande ${{BOT_PREFIX}} exécutée`, `"${{question.substring(0, 40)}}" dans ${{chat.name || msg.from}}`);
+    await msg.reply("🤖 " + answer);
+    logToDashboard("command", BOT_PREFIX + " exécutée", question.substring(0, 40));
   }}
 }});
 
@@ -759,13 +613,235 @@ client.initialize();
 '''
     return {"code": code, "stats": {"commands": len(commands), "auto_replies": len(auto_replies), "banned_words": len(banned_words)}}
 
+# ── Feature 1: Récidivistes ───────────────────────────────────
+
+@api_router.get("/recidivistes")
+async def get_recidivistes():
+    """
+    Aggregates activity_logs where type='delete', extracts person name from
+    detail field (format: "Mot interdit par NAME dans GROUPNAME"),
+    counts occurrences per person, sorted descending by count.
+    """
+    pipeline = [
+        {"$match": {"type": "delete"}},
+        {"$addFields": {
+            "parsed_name": {
+                "$trim": {
+                    "input": {
+                        "$arrayElemAt": [
+                            {"$split": [
+                                {"$arrayElemAt": [{"$split": ["$detail", " par "]}, 1]},
+                                " dans "
+                            ]},
+                            0
+                        ]
+                    }
+                }
+            }
+        }},
+        {"$group": {
+            "_id": "$parsed_name",
+            "count": {"$sum": 1},
+            "last_message": {"$last": "$content"},
+            "last_seen": {"$last": "$timestamp"}
+        }},
+        {"$match": {"_id": {"$ne": None}, "_id": {"$ne": ""}}},
+        {"$sort": {"count": -1}},
+        {"$project": {
+            "_id": 0,
+            "name": "$_id",
+            "count": 1,
+            "last_message": 1,
+            "last_seen": 1
+        }}
+    ]
+    results = await db.activity_logs.aggregate(pipeline).to_list(1000)
+    return results
+
+# ── Feature 2: Backup / Restore ───────────────────────────────
+
+@api_router.get("/backup")
+async def backup_data():
+    """Returns all data from all collections (excluding _id)."""
+    auto_replies = await db.auto_replies.find({}, {"_id": 0}).to_list(10000)
+    banned_words = await db.banned_words.find({}, {"_id": 0}).to_list(10000)
+    commands = await db.commands.find({}, {"_id": 0}).to_list(10000)
+    settings_list = await db.settings.find({}, {"_id": 0}).to_list(10)
+    whitelist = await db.whitelist.find({}, {"_id": 0}).to_list(10000)
+    scheduled_messages = await db.scheduled_messages.find({}, {"_id": 0}).to_list(10000)
+    return {
+        "auto_replies": auto_replies,
+        "banned_words": banned_words,
+        "commands": commands,
+        "settings": settings_list,
+        "whitelist": whitelist,
+        "scheduled_messages": scheduled_messages,
+    }
+
+@api_router.post("/restore", dependencies=[Depends(require_auth)])
+async def restore_data(payload: dict):
+    """
+    Accepts a backup JSON object. For each collection present in the body,
+    drops existing data and inserts the new data.
+    """
+    collection_map = {
+        "auto_replies": db.auto_replies,
+        "banned_words": db.banned_words,
+        "commands": db.commands,
+        "settings": db.settings,
+        "whitelist": db.whitelist,
+        "scheduled_messages": db.scheduled_messages,
+    }
+    restored = []
+    for key, collection in collection_map.items():
+        if key in payload and isinstance(payload[key], list):
+            await collection.delete_many({})
+            if payload[key]:
+                await collection.insert_many(payload[key])
+            restored.append(key)
+    return {"ok": True, "restored": restored}
+
+# ── Feature 3: PWA / Mobile Dashboard ────────────────────────
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    manifest = {
+        "name": "CROUS BOT Dashboard",
+        "short_name": "CROUS BOT",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#030305",
+        "theme_color": "#10B981",
+        "icons": [
+            {
+                "src": "/api/pwa-icon",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    }
+    return JSONResponse(content=manifest)
+
+@api_router.get("/pwa-icon")
+async def pwa_icon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#030305"/>
+  <!-- Robot head -->
+  <rect x="136" y="160" width="240" height="200" rx="30" fill="#10B981"/>
+  <!-- Eyes -->
+  <circle cx="196" cy="230" r="28" fill="#030305"/>
+  <circle cx="316" cy="230" r="28" fill="#030305"/>
+  <circle cx="196" cy="230" r="14" fill="#10B981"/>
+  <circle cx="316" cy="230" r="14" fill="#10B981"/>
+  <!-- Mouth -->
+  <rect x="176" y="300" width="160" height="30" rx="15" fill="#030305"/>
+  <rect x="196" y="308" width="24" height="14" rx="4" fill="#10B981"/>
+  <rect x="232" y="308" width="24" height="14" rx="4" fill="#10B981"/>
+  <rect x="268" y="308" width="24" height="14" rx="4" fill="#10B981"/>
+  <rect x="304" y="308" width="24" height="14" rx="4" fill="#10B981"/>
+  <!-- Antenna -->
+  <rect x="244" y="110" width="24" height="56" rx="12" fill="#10B981"/>
+  <circle cx="256" cy="100" r="20" fill="#10B981"/>
+  <!-- Ears / side bolts -->
+  <rect x="100" y="205" width="36" height="50" rx="10" fill="#10B981"/>
+  <rect x="376" y="205" width="36" height="50" rx="10" fill="#10B981"/>
+  <!-- Body -->
+  <rect x="176" y="370" width="160" height="80" rx="20" fill="#10B981"/>
+  <!-- Arms -->
+  <rect x="80" y="375" width="96" height="36" rx="18" fill="#10B981"/>
+  <rect x="336" y="375" width="96" height="36" rx="18" fill="#10B981"/>
+</svg>"""
+    return Response(content=svg, media_type="image/svg+xml")
+
+# ── Feature 4: Whitelist ──────────────────────────────────────
+
+@api_router.get("/whitelist", response_model=List[WhitelistEntry])
+async def get_whitelist():
+    items = await db.whitelist.find({}, {"_id": 0}).to_list(1000)
+    return items
+
+@api_router.post("/whitelist", response_model=WhitelistEntry, dependencies=[Depends(require_auth)])
+async def add_whitelist_entry(data: WhitelistEntryCreate):
+    obj = WhitelistEntry(phone=data.phone, name=data.name)
+    await db.whitelist.insert_one(obj.model_dump())
+    return obj
+
+@api_router.delete("/whitelist/{entry_id}", dependencies=[Depends(require_auth)])
+async def delete_whitelist_entry(entry_id: str):
+    result = await db.whitelist.delete_one({"id": entry_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+# ── Feature 5: Scheduled Messages ────────────────────────────
+
+@api_router.get("/scheduled", response_model=List[ScheduledMessage])
+async def get_scheduled():
+    items = await db.scheduled_messages.find({}, {"_id": 0}).to_list(1000)
+    return items
+
+@api_router.post("/scheduled", response_model=ScheduledMessage, dependencies=[Depends(require_auth)])
+async def create_scheduled(data: ScheduledMessageCreate):
+    obj = ScheduledMessage(**data.model_dump())
+    await db.scheduled_messages.insert_one(obj.model_dump())
+    return obj
+
+@api_router.put("/scheduled/{msg_id}", response_model=ScheduledMessage, dependencies=[Depends(require_auth)])
+async def update_scheduled(msg_id: str, data: ScheduledMessageUpdate):
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    await db.scheduled_messages.update_one({"id": msg_id}, {"$set": update_data})
+    item = await db.scheduled_messages.find_one({"id": msg_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    return item
+
+@api_router.delete("/scheduled/{msg_id}", dependencies=[Depends(require_auth)])
+async def delete_scheduled(msg_id: str):
+    result = await db.scheduled_messages.delete_one({"id": msg_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+# ── Feature 6: Auth / Admin Login ────────────────────────────
+
+@api_router.post("/login")
+async def login(data: LoginRequest):
+    settings_doc = await db.settings.find_one({}, {"_id": 0})
+    admin_password = (settings_doc or {}).get("admin_password", "")
+    if not admin_password:
+        # No password set — always succeed
+        token = str(uuid.uuid4())
+        valid_tokens.add(token)
+        return {"ok": True, "token": token}
+    if data.password != admin_password:
+        raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+    token = str(uuid.uuid4())
+    valid_tokens.add(token)
+    return {"ok": True, "token": token}
+
+@api_router.get("/auth-check")
+async def auth_check(request: Request):
+    settings_doc = await db.settings.find_one({}, {"_id": 0})
+    admin_password = (settings_doc or {}).get("admin_password", "")
+    if not admin_password:
+        return {"authenticated": True}
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = auth_header[len("Bearer "):]
+    if token not in valid_tokens:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return {"authenticated": True}
+
 
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CROUS BOT — Dashboard</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CROUS BOT">
+<meta name="theme-color" content="#030305">
+<link rel="manifest" href="/manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@700;900&display=swap" rel="stylesheet">
@@ -38,9 +43,36 @@ tailwind.config = {
   .nav-btn { transition: all 0.2s; }
   .nav-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
   .nav-btn.active { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.4); color: #10B981; }
+  /* Day toggle buttons */
+  .day-btn { transition: all 0.15s; }
+  .day-btn.active { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.5); color: #F59E0B; }
+  .day-btn:not(.active) { background: #030305; border-color: rgba(255,255,255,0.1); color: #52525b; }
 </style>
 </head>
 <body>
+
+<!-- ─── LOGIN OVERLAY ─── -->
+<div id="login-overlay" class="fixed inset-0 z-[100] bg-[#030305] flex items-center justify-center hidden">
+  <form onsubmit="doLogin(event)" class="w-full max-w-sm p-8 border border-white/10 bg-[#0B0B10] space-y-6">
+    <div class="text-center">
+      <div class="w-12 h-12 bg-emerald-500 flex items-center justify-center mx-auto mb-4">
+        <svg width="24" height="24" viewBox="0 0 256 256" fill="black"><path d="M200,48H136V16a8,8,0,0,0-16,0V48H56A32,32,0,0,0,24,80V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V80A32,32,0,0,0,200,48ZM104,176a24,24,0,1,1,24-24A24,24,0,0,1,104,176Zm72-56H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Z"/></svg>
+      </div>
+      <h2 class="text-white font-black font-heading text-lg">CROUS BOT</h2>
+      <p class="text-zinc-500 text-xs font-mono mt-1">Accès au dashboard</p>
+    </div>
+    <div>
+      <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Mot de passe</label>
+      <input id="login-password" type="password" required placeholder="••••••••"
+        class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+    </div>
+    <div id="login-error" class="hidden text-red-400 text-xs font-mono text-center">Mot de passe incorrect</div>
+    <button type="submit" class="w-full px-4 py-2.5 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+      Connexion
+    </button>
+  </form>
+</div>
+
 <!-- ─── NOTIFICATION ─── -->
 <div id="notification" class="fixed top-4 right-4 z-50 px-4 py-3 border text-sm font-mono items-center gap-2 hidden" style="transition: all 0.3s;"></div>
 
@@ -65,12 +97,19 @@ tailwind.config = {
         </div>
         <div>
           <div class="text-white font-black text-sm font-heading">CROUS BOT</div>
-          <div class="text-zinc-500 text-xs font-mono">Dashboard v2.0</div>
+          <div class="text-zinc-500 text-xs font-mono">Dashboard v3.0</div>
         </div>
       </div>
     </div>
-    <nav class="flex-1 p-4 space-y-1" id="nav-items"></nav>
-    <div class="p-4 border-t border-white/5">
+    <nav class="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-thin" id="nav-items"></nav>
+    <div class="p-4 border-t border-white/5 space-y-2">
+      <button id="install-btn" onclick="installPWA()" class="hidden w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/10 transition-colors">
+        📱 Installer sur mobile
+      </button>
+      <button id="logout-btn" onclick="logout()" class="hidden w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-zinc-500 border border-white/5 hover:border-red-500/30 hover:text-red-400 transition-colors">
+        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M120,216a8,8,0,0,1-8,8H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32h64a8,8,0,0,1,0,16H48V208h64A8,8,0,0,1,120,216Zm109.66-93.66-40-40a8,8,0,0,0-11.32,11.32L204.69,120H112a8,8,0,0,0,0,16h92.69l-26.35,26.34a8,8,0,0,0,11.32,11.32l40-40A8,8,0,0,0,229.66,122.34Z"/></svg>
+        Déconnexion
+      </button>
       <div class="flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
         <span class="font-mono text-xs text-zinc-500">whatsapp-web.js</span>
@@ -99,9 +138,63 @@ tailwind.config = {
 
 <script>
 // ── CONFIG ──────────────────────────────────────────────────
-// CHANGE THIS to your backend URL
 const API_BASE = '';
 const API = API_BASE + '/api';
+
+// ── AUTH STATE ───────────────────────────────────────────────
+let authToken = localStorage.getItem('crous_auth_token') || '';
+let authRequired = false;
+
+async function checkAuth() {
+  try {
+    const r = await fetch(API + '/auth-check', { headers: authToken ? {'Authorization': 'Bearer ' + authToken} : {} });
+    if (r.ok) return true;
+    if (r.status === 401) { authRequired = true; return false; }
+    return true;
+  } catch { return true; }
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const pw = document.getElementById('login-password').value;
+  try {
+    const r = await fetch(API + '/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: pw}) });
+    const data = await r.json();
+    if (data.ok) {
+      authToken = data.token;
+      localStorage.setItem('crous_auth_token', authToken);
+      document.getElementById('login-overlay').classList.add('hidden');
+      if (authRequired) {
+        document.getElementById('logout-btn').classList.remove('hidden');
+      }
+      buildNav();
+      navigate('overview');
+    } else {
+      document.getElementById('login-error').classList.remove('hidden');
+    }
+  } catch { document.getElementById('login-error').classList.remove('hidden'); }
+}
+
+function logout() {
+  authToken = '';
+  localStorage.removeItem('crous_auth_token');
+  location.reload();
+}
+
+// ── PWA ──────────────────────────────────────────────────────
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('install-btn').classList.remove('hidden');
+});
+
+function installPWA() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+  }
+}
 
 // ── STATE ───────────────────────────────────────────────────
 let currentSection = 'overview';
@@ -116,6 +209,10 @@ const NAV = [
   { id: 'commands', label: 'Commandes', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M120,137.74,24.15,201a8,8,0,0,1-8.3-13.68L111.7,128,15.85,68.72a8,8,0,0,1,8.3-13.68L120,118.26ZM128,192a8,8,0,0,0,0,16h104a8,8,0,0,0,0-16Z"/></svg>` },
   { id: 'settings', label: 'Paramètres', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Z"/></svg>` },
   { id: 'generator', label: 'Générateur', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z"/></svg>` },
+  { id: 'recidivistes', label: 'Récidivistes', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8C55.71,189.29,89.05,168,128,168s72.29,21.29,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z"/></svg>` },
+  { id: 'whitelist', label: 'Whitelist', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm45.66,85.66-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32Z"/></svg>` },
+  { id: 'scheduled', label: 'Programmés', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,40a96,96,0,1,0,96,96A96.11,96.11,0,0,0,128,40Zm0,176a80,80,0,1,1,80-80A80.09,80.09,0,0,1,128,216ZM173.66,90.34a8,8,0,0,1,0,11.32L136,139.31V184a8,8,0,0,1-16,0V128a8,8,0,0,1,2.34-5.66l40-40A8,8,0,0,1,173.66,90.34Z"/></svg>` },
+  { id: 'backup', label: 'Backup', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-42.34-77.66a8,8,0,0,1-11.32,11.32L136,139.31V184a8,8,0,0,1-16,0V139.31l-10.34,10.35a8,8,0,0,1-11.32-11.32l24-24a8,8,0,0,1,11.32,0Z"/></svg>` },
 ];
 
 function buildNav() {
@@ -134,7 +231,6 @@ function navigate(section) {
   document.getElementById('header-label').textContent = NAV.find(n => n.id === section)?.label || '';
   buildNav();
   renderSection();
-  // Close mobile sidebar
   document.getElementById('sidebar').classList.add('-translate-x-full');
   document.getElementById('sidebar-overlay').classList.add('hidden');
 }
@@ -159,29 +255,44 @@ function notify(msg, type = 'success') {
 
 // ── FETCH HELPERS ───────────────────────────────────────────
 async function apiGet(path) {
-  const r = await fetch(API + path);
+  const headers = {};
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const r = await fetch(API + path, { headers });
+  if (r.status === 401) { location.reload(); return; }
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 async function apiPost(path, body) {
-  const r = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const r = await fetch(API + path, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (r.status === 401) { location.reload(); return; }
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Erreur'); }
   return r.json();
 }
 async function apiPut(path, body) {
-  const r = await fetch(API + path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const r = await fetch(API + path, { method: 'PUT', headers, body: JSON.stringify(body) });
+  if (r.status === 401) { location.reload(); return; }
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 async function apiDelete(path) {
-  const r = await fetch(API + path, { method: 'DELETE' });
+  const headers = {};
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const r = await fetch(API + path, { method: 'DELETE', headers });
+  if (r.status === 401) { location.reload(); return; }
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 async function apiUpload(file) {
   const fd = new FormData();
   fd.append('file', file);
-  const r = await fetch(API + '/upload', { method: 'POST', body: fd });
+  const headers = {};
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  const r = await fetch(API + '/upload', { method: 'POST', body: fd, headers });
+  if (r.status === 401) { location.reload(); return; }
   if (!r.ok) throw new Error('Upload failed');
   return r.json();
 }
@@ -196,6 +307,10 @@ async function renderSection() {
     case 'commands': await renderCommands(el); break;
     case 'settings': await renderSettings(el); break;
     case 'generator': renderGenerator(el); break;
+    case 'recidivistes': await renderRecidivistes(el); break;
+    case 'whitelist': await renderWhitelist(el); break;
+    case 'scheduled': await renderScheduled(el); break;
+    case 'backup': await renderBackup(el); break;
   }
 }
 
@@ -238,14 +353,17 @@ async function renderOverview(el) {
           <span class="font-mono text-xs uppercase tracking-widest text-emerald-400">Journal d'activité</span>
           <span class="ml-auto font-mono text-xs text-zinc-600">${activityData.length} entrées</span>
         </div>
-        <div class="p-4 space-y-2 max-h-72 overflow-y-auto scrollbar-thin font-mono">
+        <div class="p-4 space-y-2 overflow-y-auto scrollbar-thin font-mono" style="max-height:70vh">
           ${activityData.length === 0 ? '<p class="text-zinc-600 text-sm text-center py-4">Aucune activité enregistrée</p>' :
             activityData.map(log => `
-              <div class="flex items-start gap-3 text-sm">
-                <span class="text-zinc-700 shrink-0 text-xs mt-0.5">${new Date(log.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-                <span class="shrink-0 ${logColors[log.type] || 'text-zinc-400'}">›</span>
-                <span class="text-zinc-300">${esc(log.message)}</span>
-                ${log.detail ? `<span class="text-zinc-600 text-xs ml-auto hidden sm:inline">${esc(log.detail)}</span>` : ''}
+              <div class="flex flex-col gap-1 py-1.5 ${log !== activityData[activityData.length-1] ? 'border-b border-white/5' : ''}">
+                <div class="flex items-start gap-3 text-sm">
+                  <span class="text-zinc-700 shrink-0 text-xs mt-0.5">${new Date(log.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span class="shrink-0 ${logColors[log.type] || 'text-zinc-400'}">›</span>
+                  <span class="text-zinc-300">${esc(log.message)}</span>
+                  ${log.detail ? `<span class="text-zinc-600 text-xs ml-auto hidden sm:inline">${esc(log.detail)}</span>` : ''}
+                </div>
+                ${log.content ? `<div class="ml-10 px-3 py-1.5 bg-red-500/5 border border-red-500/15 text-red-300/80 text-xs font-mono truncate max-w-xl" title="${esc(log.content)}">💬 « ${esc(log.content)} »</div>` : ''}
               </div>
             `).join('')}
         </div>
@@ -472,7 +590,7 @@ async function renderBannedWords(el) {
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image d’avertissement (optionnel)</label>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image d'avertissement (optionnel)</label>
             <div class="flex items-center gap-2">
               <input type="file" id="bw-image" accept="image/*" onchange="bwPreviewMedia('image')" class="hidden">
               <button type="button" onclick="document.getElementById('bw-image').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
@@ -482,7 +600,7 @@ async function renderBannedWords(el) {
             </div>
           </div>
           <div>
-            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Audio d’avertissement (optionnel)</label>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Audio d'avertissement (optionnel)</label>
             <div class="flex items-center gap-2">
               <input type="file" id="bw-audio" accept="audio/*,video/mp4" onchange="bwPreviewMedia('audio')" class="hidden">
               <button type="button" onclick="document.getElementById('bw-audio').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
@@ -956,6 +1074,503 @@ function downloadGen() {
   URL.revokeObjectURL(url);
 }
 
+// ── FEATURE 1: RÉCIDIVISTES ──────────────────────────────────
+async function renderRecidivistes(el) {
+  let data = [];
+  try { data = await apiGet('/recidivistes'); } catch {}
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const top3 = data.slice(0, 3);
+  const rest = data.slice(3);
+
+  function relativeTime(ts) {
+    if (!ts) return '—';
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hrs = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return 'À l\'instant';
+    if (mins < 60) return `Il y a ${mins}min`;
+    if (hrs < 24) return `Il y a ${hrs}h`;
+    return `Il y a ${days}j`;
+  }
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Modération</p>
+        <h2 class="text-2xl font-black text-white font-heading">Récidivistes</h2>
+        <p class="text-zinc-500 text-sm mt-1">Membres avec le plus de messages supprimés.</p>
+      </div>
+
+      ${data.length === 0 ? `
+        <div class="flex flex-col items-center justify-center py-20 border border-white/5 bg-[#0B0B10]">
+          <div class="text-4xl mb-4">🏆</div>
+          <p class="text-zinc-500 font-mono text-sm">Aucun récidiviste pour l'instant</p>
+          <p class="text-zinc-700 font-mono text-xs mt-1">Le classement apparaîtra ici</p>
+        </div>
+      ` : `
+        ${top3.length > 0 ? `
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          ${top3.map((person, i) => `
+            <div class="relative p-5 border ${i === 0 ? 'border-red-500/40 bg-red-500/5' : i === 1 ? 'border-red-500/20 bg-red-500/3' : 'border-white/5 bg-[#0B0B10]'} flex flex-col items-center text-center space-y-2">
+              <div class="text-3xl">${medals[i]}</div>
+              <div class="text-4xl font-black font-mono text-red-400">${person.count ?? person.deleted_count ?? 0}</div>
+              <div class="text-white font-bold text-sm truncate w-full">${esc(person.name || person.phone || 'Inconnu')}</div>
+              ${person.phone ? `<div class="font-mono text-xs text-zinc-600">${esc(person.phone)}</div>` : ''}
+              <div class="font-mono text-xs text-zinc-500">suppressions</div>
+              ${person.last_message ? `<div class="mt-2 w-full px-2 py-1.5 bg-red-500/10 border border-red-500/20 text-red-300/80 text-xs font-mono text-left truncate" title="${esc(person.last_message)}">💬 ${esc(person.last_message)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>` : ''}
+
+        ${rest.length > 0 ? `
+        <div class="border border-white/5 bg-[#0B0B10] overflow-hidden">
+          <div class="border-b border-white/5 px-4 py-3 flex items-center gap-2">
+            <span class="text-red-400 text-xs">▼</span>
+            <span class="font-mono text-xs uppercase tracking-widest text-zinc-400">Classement complet</span>
+            <span class="ml-auto font-mono text-xs text-zinc-600">${data.length} membres</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-white/5">
+                  <th class="px-4 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-zinc-600">#</th>
+                  <th class="px-4 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-zinc-600">Nom</th>
+                  <th class="px-4 py-2.5 text-right font-mono text-xs uppercase tracking-widest text-zinc-600">Suppressions</th>
+                  <th class="px-4 py-2.5 text-left font-mono text-xs uppercase tracking-widest text-zinc-600 hidden md:table-cell">Dernier message</th>
+                  <th class="px-4 py-2.5 text-right font-mono text-xs uppercase tracking-widest text-zinc-600 hidden sm:table-cell">Date</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                ${rest.map((person, i) => `
+                  <tr class="hover:bg-white/2 transition-colors">
+                    <td class="px-4 py-3 font-mono text-zinc-600 text-xs">${i + 4}</td>
+                    <td class="px-4 py-3">
+                      <div class="text-white font-medium text-sm">${esc(person.name || 'Inconnu')}</div>
+                      ${person.phone ? `<div class="font-mono text-xs text-zinc-600">${esc(person.phone)}</div>` : ''}
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                      <span class="font-mono font-bold text-red-400">${person.count ?? person.deleted_count ?? 0}</span>
+                    </td>
+                    <td class="px-4 py-3 hidden md:table-cell">
+                      <span class="text-zinc-500 text-xs font-mono truncate max-w-xs block" title="${esc(person.last_message || '')}">
+                        ${person.last_message ? '💬 ' + esc(person.last_message.slice(0, 60)) + (person.last_message.length > 60 ? '…' : '') : '—'}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-right hidden sm:table-cell">
+                      <span class="font-mono text-xs text-zinc-600">${relativeTime(person.last_at || person.updated_at)}</span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>` : ''}
+      `}
+    </div>`;
+}
+
+// ── FEATURE 2: BACKUP ────────────────────────────────────────
+async function renderBackup(el) {
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Sauvegarde</p>
+        <h2 class="text-2xl font-black text-white font-heading">Backup / Restore</h2>
+        <p class="text-zinc-500 text-sm mt-1">Exportez ou restaurez toute la configuration du bot.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- EXPORT CARD -->
+        <div class="p-6 border border-emerald-500/20 bg-emerald-500/3 space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg">⬇</div>
+            <div>
+              <div class="text-white font-bold">Exporter</div>
+              <div class="text-zinc-500 text-xs font-mono">Télécharger la config en JSON</div>
+            </div>
+          </div>
+          <p class="text-zinc-500 text-sm">Sauvegarde toutes vos auto-réponses, mots bannis, commandes et paramètres dans un fichier JSON.</p>
+          <button onclick="downloadBackup()" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></svg>
+            Télécharger le backup
+          </button>
+        </div>
+
+        <!-- IMPORT CARD -->
+        <div class="p-6 border border-amber-500/20 bg-amber-500/3 space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 text-lg">⬆</div>
+            <div>
+              <div class="text-white font-bold">Importer</div>
+              <div class="text-zinc-500 text-xs font-mono">Restaurer depuis un fichier JSON</div>
+            </div>
+          </div>
+          <p class="text-zinc-500 text-sm">Sélectionnez un fichier de backup précédent pour restaurer la configuration. Les données actuelles seront remplacées.</p>
+          <div class="space-y-3">
+            <div class="relative">
+              <input type="file" id="restore-file" accept=".json" class="hidden" onchange="updateRestoreLabel(this)">
+              <button type="button" onclick="document.getElementById('restore-file').click()" class="w-full flex items-center gap-2 px-3 py-2.5 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-amber-500/40 transition-colors font-mono">
+                <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/></svg>
+                <span id="restore-label">Choisir un fichier .json</span>
+              </button>
+            </div>
+            <button onclick="restoreBackup()" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-85.66-82.34a8,8,0,0,0-11.32,0l-40,40a8,8,0,0,0,11.32,11.32L120,86.63V184a8,8,0,0,0,16,0V86.63l21.66,21.65a8,8,0,0,0,11.32-11.32Z"/></svg>
+              Restaurer
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="border border-white/5 bg-[#0B0B10] p-5 space-y-3">
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500">Contenu du backup</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${[
+            { icon: '💬', label: 'Auto-réponses', desc: 'Triggers, réponses, médias' },
+            { icon: '🚫', label: 'Mots bannis', desc: 'Insultes & religieux' },
+            { icon: '⌨️', label: 'Commandes', desc: 'Toutes les commandes bot' },
+            { icon: '⚙️', label: 'Paramètres', desc: 'Config & clé API' },
+          ].map(item => `
+            <div class="flex gap-2 p-3 border border-white/5">
+              <span class="text-base">${item.icon}</span>
+              <div>
+                <div class="text-white text-xs font-medium">${item.label}</div>
+                <div class="text-zinc-600 text-xs font-mono">${item.desc}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function updateRestoreLabel(input) {
+  const label = document.getElementById('restore-label');
+  if (label && input.files[0]) {
+    label.textContent = input.files[0].name;
+  }
+}
+
+async function downloadBackup() {
+  try {
+    const data = await apiGet('/backup');
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'crous-bot-backup-' + new Date().toISOString().slice(0,10) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    notify('Backup téléchargé !');
+  } catch { notify('Erreur lors de l\'export', 'error'); }
+}
+
+async function restoreBackup() {
+  const input = document.getElementById('restore-file');
+  const file = input.files[0];
+  if (!file) { notify('Sélectionnez un fichier d\'abord', 'error'); return; }
+  const text = await file.text();
+  let data;
+  try { data = JSON.parse(text); } catch { notify('Fichier JSON invalide', 'error'); return; }
+  if (!confirm('Restaurer cette sauvegarde ? Les données actuelles seront remplacées.')) return;
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+    const r = await fetch(API + '/restore', { method: 'POST', headers, body: JSON.stringify(data) });
+    const result = await r.json();
+    notify('Restauration terminée : ' + (result.restored || []).join(', '));
+    renderBackup(document.getElementById('content'));
+  } catch { notify('Erreur lors de la restauration', 'error'); }
+}
+
+// ── FEATURE 4: WHITELIST ─────────────────────────────────────
+let wlData = [], wlNew = { phone: '', name: '' };
+
+async function renderWhitelist(el) {
+  try { wlData = await apiGet('/whitelist'); } catch {}
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Modération</p>
+        <h2 class="text-2xl font-black text-white font-heading">Whitelist</h2>
+        <p class="text-zinc-500 text-sm mt-1">Personnes exemptées de modération.</p>
+      </div>
+
+      <form onsubmit="wlAdd(event)" class="p-5 border border-emerald-500/20 bg-emerald-500/3 space-y-4">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Ajouter une personne</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Numéro (ex: 33612345678)</label>
+            <input id="wl-phone" value="${esc(wlNew.phone)}" placeholder="33612345678" required
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Nom (optionnel)</label>
+            <input id="wl-name" value="${esc(wlNew.name)}" placeholder="Prénom ou pseudo..."
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+          </div>
+        </div>
+        <button type="submit" class="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+          + Ajouter à la whitelist
+        </button>
+      </form>
+
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <p class="font-mono text-xs uppercase tracking-widest text-zinc-500">${wlData.length} personne${wlData.length !== 1 ? 's' : ''} exemptée${wlData.length !== 1 ? 's' : ''}</p>
+        </div>
+
+        ${wlData.length === 0 ? `
+          <div class="flex flex-col items-center justify-center py-16 border border-white/5 bg-[#0B0B10]">
+            <div class="w-12 h-12 border border-emerald-500/20 flex items-center justify-center text-emerald-500/40 mb-4">
+              <svg width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm45.66,85.66-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32Z"/></svg>
+            </div>
+            <p class="text-zinc-500 font-mono text-sm">Whitelist vide</p>
+            <p class="text-zinc-700 font-mono text-xs mt-1">Ajoutez des membres ci-dessus</p>
+          </div>
+        ` : `
+          <div class="space-y-2">
+            ${wlData.map(person => `
+              <div class="flex items-center gap-4 p-4 border border-emerald-500/10 bg-emerald-500/3 hover:border-emerald-500/20 transition-colors">
+                <div class="w-9 h-9 bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                  <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor" class="text-emerald-400"><path d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8C55.71,189.29,89.05,168,128,168s72.29,21.29,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-white font-medium text-sm">${esc(person.name || 'Sans nom')}</div>
+                  <div class="font-mono text-xs text-zinc-500">${esc(person.phone)}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="font-mono text-xs px-2 py-0.5 border border-emerald-500/20 text-emerald-400 bg-emerald-500/5">✓ Exempté</span>
+                  <button onclick="wlDel('${person.id}')" class="text-zinc-600 hover:text-red-400 transition-colors p-1" title="Retirer">✕</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    </div>`;
+}
+
+async function wlAdd(e) {
+  e.preventDefault();
+  const phone = document.getElementById('wl-phone').value.trim();
+  const name = document.getElementById('wl-name').value.trim();
+  if (!phone) return;
+  try {
+    await apiPost('/whitelist', { phone, name });
+    notify(`${name || phone} ajouté à la whitelist !`);
+    wlNew = { phone: '', name: '' };
+    renderWhitelist(document.getElementById('content'));
+  } catch (err) { notify(err.message || 'Erreur', 'error'); }
+}
+
+async function wlDel(id) {
+  if (!confirm('Retirer cette personne de la whitelist ?')) return;
+  try {
+    await apiDelete(`/whitelist/${id}`);
+    notify('Retiré de la whitelist');
+    renderWhitelist(document.getElementById('content'));
+  } catch { notify('Erreur', 'error'); }
+}
+
+// ── FEATURE 5: SCHEDULED MESSAGES ───────────────────────────
+let schedData = [], schedShowForm = false, schedEditId = null;
+let schedForm = { message: '', cron_time: '08:00', days: ['lun','mar','mer','jeu','ven'], target_group: '', active: true, image_url: null };
+const DAYS = ['lun','mar','mer','jeu','ven','sam','dim'];
+const DAY_LABELS = { lun:'Lun', mar:'Mar', mer:'Mer', jeu:'Jeu', ven:'Ven', sam:'Sam', dim:'Dim' };
+
+async function renderScheduled(el) {
+  try { schedData = await apiGet('/scheduled'); } catch {}
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div class="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Automatisation</p>
+          <h2 class="text-2xl font-black text-white font-heading">Messages Programmés</h2>
+        </div>
+        <button onclick="schedToggleForm()" class="flex items-center gap-2 px-4 py-2 bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 transition-colors">
+          + Nouveau
+        </button>
+      </div>
+
+      ${schedShowForm ? `
+      <form onsubmit="schedSubmit(event)" class="p-5 border border-amber-500/30 bg-[#0B0B10] space-y-4">
+        <p class="font-mono text-xs uppercase tracking-widest text-amber-400">${schedEditId ? 'Modifier le message programmé' : 'Nouveau message programmé'}</p>
+
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Message</label>
+          <textarea id="sched-message" placeholder="Contenu du message..." required rows="3"
+            class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono resize-none">${esc(schedForm.message)}</textarea>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Heure d'envoi</label>
+            <input id="sched-time" type="time" value="${esc(schedForm.cron_time)}"
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono">
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Groupe cible</label>
+            <input id="sched-group" value="${esc(schedForm.target_group)}" placeholder="ID ou nom du groupe..."
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-2 uppercase tracking-widest">Jours d'envoi</label>
+          <div class="flex flex-wrap gap-2">
+            ${DAYS.map(day => `
+              <button type="button" onclick="schedToggleDay('${day}')" id="day-btn-${day}"
+                class="day-btn px-3 py-1.5 font-mono text-xs border transition-all ${schedForm.days.includes(day) ? 'active' : ''}">
+                ${DAY_LABELS[day]}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image (optionnel)</label>
+          <div class="flex items-center gap-2">
+            <input type="file" id="sched-image" accept="image/*" onchange="schedPreviewImage()" class="hidden">
+            <button type="button" onclick="document.getElementById('sched-image').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-amber-500/50 transition-colors font-mono">
+              <span>📷</span> <span id="sched-image-label">${schedForm.image_url ? 'Image sélectionnée ✓' : 'Choisir une image'}</span>
+            </button>
+            ${schedForm.image_url ? '<button type="button" onclick="schedRemoveImage()" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+          </div>
+          ${schedForm.image_url ? '<div class="mt-2"><img src="' + API_BASE + schedForm.image_url + '" class="max-h-20 border border-white/10"></div>' : ''}
+        </div>
+
+        <div class="flex gap-3">
+          <button type="submit" class="px-4 py-2 bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 transition-colors flex items-center gap-2">
+            ✓ ${schedEditId ? 'Modifier' : 'Programmer'}
+          </button>
+          <button type="button" onclick="schedToggleForm()" class="px-4 py-2 border border-white/10 text-white text-sm hover:border-white/30 transition-colors">Annuler</button>
+        </div>
+      </form>` : ''}
+
+      <div class="space-y-3">
+        ${schedData.length === 0 ? `
+          <div class="flex flex-col items-center justify-center py-16 border border-white/5 bg-[#0B0B10]">
+            <div class="text-4xl mb-4">🕐</div>
+            <p class="text-zinc-500 font-mono text-sm">Aucun message programmé</p>
+            <p class="text-zinc-700 font-mono text-xs mt-1">Créez votre premier message avec "+ Nouveau"</p>
+          </div>
+        ` : schedData.map(msg => `
+          <div class="p-4 border ${msg.active ? 'border-amber-500/20 bg-amber-500/3' : 'border-white/5 bg-[#030305] opacity-50'} space-y-3">
+            <div class="flex items-start gap-3">
+              <div class="shrink-0 mt-0.5 w-16 h-10 border ${msg.active ? 'border-amber-500/30 bg-amber-500/10' : 'border-white/10'} flex items-center justify-center">
+                <span class="font-mono font-bold text-sm ${msg.active ? 'text-amber-400' : 'text-zinc-500'}">${esc(msg.cron_time || '—')}</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-white text-sm leading-relaxed line-clamp-2">${esc(msg.message || '')}</p>
+                <div class="flex flex-wrap gap-1 mt-2">
+                  ${(msg.days || []).map(d => `<span class="font-mono text-xs px-1.5 py-0.5 border border-amber-500/20 bg-amber-500/5 text-amber-400">${DAY_LABELS[d] || d}</span>`).join('')}
+                </div>
+                ${msg.target_group ? `<div class="font-mono text-xs text-zinc-600 mt-1">→ ${esc(msg.target_group)}</div>` : ''}
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                ${msg.image_url ? `<button onclick="showMediaModal('image','${msg.image_url}')" class="font-mono text-xs px-1.5 py-0.5 border border-cyan-500/20 bg-cyan-500/5 text-cyan-400">📷</button>` : ''}
+                <button onclick="schedToggle('${msg.id}',${msg.active})" class="text-sm transition-colors ${msg.active ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-600 hover:text-zinc-400'}" title="Activer/Désactiver">
+                  ${msg.active ? '◉' : '◎'}
+                </button>
+                <button onclick="schedEdit('${msg.id}')" class="text-zinc-500 hover:text-white transition-colors p-1" title="Modifier">✎</button>
+                <button onclick="schedDel('${msg.id}')" class="text-zinc-500 hover:text-red-400 transition-colors p-1" title="Supprimer">✕</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+}
+
+function schedToggleDay(day) {
+  const idx = schedForm.days.indexOf(day);
+  if (idx > -1) schedForm.days.splice(idx, 1);
+  else schedForm.days.push(day);
+  // Update button visuals without full re-render
+  const btn = document.getElementById('day-btn-' + day);
+  if (btn) {
+    if (schedForm.days.includes(day)) btn.classList.add('active');
+    else btn.classList.remove('active');
+  }
+}
+
+function schedToggleForm() {
+  schedShowForm = !schedShowForm;
+  if (!schedShowForm) {
+    schedEditId = null;
+    schedForm = { message: '', cron_time: '08:00', days: ['lun','mar','mer','jeu','ven'], target_group: '', active: true, image_url: null };
+  }
+  renderScheduled(document.getElementById('content'));
+}
+
+async function schedPreviewImage() {
+  const input = document.getElementById('sched-image');
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const result = await apiUpload(file);
+    schedForm.image_url = result.url;
+    notify('Image uploadée !');
+    renderScheduled(document.getElementById('content'));
+  } catch { notify('Erreur upload', 'error'); }
+}
+
+function schedRemoveImage() {
+  schedForm.image_url = null;
+  renderScheduled(document.getElementById('content'));
+}
+
+async function schedSubmit(e) {
+  e.preventDefault();
+  const form = {
+    message: document.getElementById('sched-message').value,
+    cron_time: document.getElementById('sched-time').value,
+    days: [...schedForm.days],
+    target_group: document.getElementById('sched-group').value,
+    active: true,
+    image_url: schedForm.image_url || null
+  };
+  try {
+    if (schedEditId) { await apiPut(`/scheduled/${schedEditId}`, form); notify('Message modifié !'); }
+    else { await apiPost('/scheduled', form); notify('Message programmé !'); }
+    schedShowForm = false; schedEditId = null;
+    schedForm = { message: '', cron_time: '08:00', days: ['lun','mar','mer','jeu','ven'], target_group: '', active: true, image_url: null };
+    renderScheduled(document.getElementById('content'));
+  } catch { notify('Erreur', 'error'); }
+}
+
+async function schedToggle(id, active) {
+  await apiPut(`/scheduled/${id}`, { active: !active });
+  renderScheduled(document.getElementById('content'));
+}
+
+function schedEdit(id) {
+  const msg = schedData.find(x => x.id === id);
+  if (!msg) return;
+  schedForm = {
+    message: msg.message || '',
+    cron_time: msg.cron_time || '08:00',
+    days: [...(msg.days || [])],
+    target_group: msg.target_group || '',
+    active: msg.active,
+    image_url: msg.image_url || null
+  };
+  schedEditId = id; schedShowForm = true;
+  renderScheduled(document.getElementById('content'));
+}
+
+async function schedDel(id) {
+  if (!confirm('Supprimer ce message programmé ?')) return;
+  await apiDelete(`/scheduled/${id}`);
+  notify('Supprimé !');
+  renderScheduled(document.getElementById('content'));
+}
+
 // ── MEDIA MODAL ──────────────────────────────────────────────
 function showMediaModal(type, url) {
   const modal = document.getElementById('media-modal');
@@ -980,8 +1595,18 @@ function esc(str) {
 }
 
 // ── INIT ────────────────────────────────────────────────────
-buildNav();
-navigate('overview');
+(async () => {
+  const authed = await checkAuth();
+  if (!authed) {
+    document.getElementById('login-overlay').classList.remove('hidden');
+    return;
+  }
+  if (authRequired && authToken) {
+    document.getElementById('logout-btn').classList.remove('hidden');
+  }
+  buildNav();
+  navigate('overview');
+})();
 </script>
 </body>
 </html>
