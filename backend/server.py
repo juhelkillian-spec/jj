@@ -363,6 +363,27 @@ async def delete_upload(filename: str):
 
 # ── Générateur index.js ───────────────────────────────────────
 
+import base64
+import mimetypes
+
+def file_to_base64(url_path: str) -> tuple:
+    """Convertit un fichier upload en base64 pour l'intégrer dans le code."""
+    try:
+        filename = url_path.split("/")[-1]
+        file_path = UPLOADS_DIR / filename
+        if not file_path.exists():
+            return None, None
+        with open(file_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        mime, _ = mimetypes.guess_type(str(file_path))
+        if not mime:
+            ext = file_path.suffix.lower()
+            mime_map = {".mp4": "video/mp4", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4"}
+            mime = mime_map.get(ext, "application/octet-stream")
+        return data, mime
+    except Exception:
+        return None, None
+
 @api_router.get("/generate-bot")
 async def generate_bot():
     commands = await db.commands.find({"active": True}, {"_id": 0}).to_list(1000)
@@ -399,11 +420,17 @@ async def generate_bot():
         audio_url = r.get("audio_url")
         media_lines = ""
         if image_url:
-            full_url = f"{dashboard_url}{image_url}"
-            media_lines += f'\n    await sendMedia(chat, "{full_url}", "{resp}");'
+            b64, mime = file_to_base64(image_url)
+            if b64:
+                media_lines = f'\n    await sendMedia(chat, "{b64}", "{mime}", "{resp}");'
+            else:
+                media_lines = f'\n    await msg.reply("{resp}");'
         elif audio_url:
-            full_url = f"{dashboard_url}{audio_url}"
-            media_lines += f'\n    await sendAudio(chat, "{full_url}");'
+            b64, mime = file_to_base64(audio_url)
+            if b64:
+                media_lines = f'\n    await sendAudio(chat, "{b64}", "{mime}");'
+            else:
+                media_lines = f'\n    await msg.reply("{resp}");'
         else:
             media_lines = f'\n    await msg.reply("{resp}");'
         auto_reply_blocks.append(
@@ -427,11 +454,17 @@ async def generate_bot():
         image_url = c.get("image_url")
         audio_url = c.get("audio_url")
         if image_url:
-            full_url = f"{dashboard_url}{image_url}"
-            media_line = f'    await sendMedia(chat, "{full_url}", "{emoji} *{desc}*");'
+            b64, mime = file_to_base64(image_url)
+            if b64:
+                media_line = f'    await sendMedia(chat, "{b64}", "{mime}", "{emoji} *{desc}*");'
+            else:
+                media_line = f'    await msg.reply("{emoji} *{desc}*");'
         elif audio_url:
-            full_url = f"{dashboard_url}{audio_url}"
-            media_line = f'    await msg.reply("{emoji} *{desc}*");\n    await sendAudio(chat, "{full_url}");'
+            b64, mime = file_to_base64(audio_url)
+            if b64:
+                media_line = f'    await msg.reply("{emoji} *{desc}*");\n    await sendAudio(chat, "{b64}", "{mime}");'
+            else:
+                media_line = f'    await msg.reply("{emoji} *{desc}*");'
         else:
             media_line = f'    await msg.reply("{emoji} *{desc}*");'
         custom_cmd_blocks.append(
@@ -550,23 +583,27 @@ const client = new Client({{
   puppeteer: {{ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }},
 }});
 
-// ── Envoi de media ────────────────────────────────────────────
+// ── Envoi de media (base64 intégré) ──────────────────────────
 const {{ MessageMedia }} = require("whatsapp-web.js");
 
-async function sendMedia(chat, url, caption) {{
+async function sendMedia(chat, base64Data, mimeType, caption) {{
   try {{
-    const media = await MessageMedia.fromUrl(url, {{ unsafeMime: true }});
-    await chat.sendMessage(media, {{ caption }});
+    const media = new MessageMedia(mimeType, base64Data);
+    await chat.sendMessage(media, {{ caption: caption || "" }});
   }} catch (e) {{
-    await chat.sendMessage(caption || "");
+    console.warn("⚠️ Erreur envoi image:", e.message);
+    if (caption) await chat.sendMessage(caption);
   }}
 }}
 
-async function sendAudio(chat, url) {{
+async function sendAudio(chat, base64Data, mimeType) {{
   try {{
-    const media = await MessageMedia.fromUrl(url, {{ unsafeMime: true }});
-    await chat.sendMessage(media, {{ sendAudioAsVoice: true }});
-  }} catch (e) {{}}
+    const media = new MessageMedia(mimeType, base64Data);
+    const isVoice = mimeType.includes("ogg") || mimeType.includes("wav");
+    await chat.sendMessage(media, {{ sendAudioAsVoice: isVoice }});
+  }} catch (e) {{
+    console.warn("⚠️ Erreur envoi audio:", e.message);
+  }}
 }}
 
 client.on("qr", (qr) => {{ console.log("\\n📱 Scanne ce QR code avec WhatsApp :\\n"); qrcode.generate(qr, {{ small: true }}); }});
