@@ -515,9 +515,11 @@ async def generate_bot():
 
     code = f'''// WhatsApp Bot — Généré par CROUS Dashboard
 // API : OpenAI ({gpt_model})
-const {{ Client, LocalAuth }} = require("whatsapp-web.js");
+"use strict";
+const {{ Client, LocalAuth, MessageMedia }} = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const OpenAI = require("openai");
+const http = require("http");
 const https = require("https");
 
 const OPENAI_API_KEY = "{api_key}";
@@ -525,28 +527,34 @@ const BOT_PREFIX = "{bot_prefix}";
 const DASHBOARD_URL = "{dashboard_url}";
 
 function logToDashboard(type, message, detail, content) {{
-  const body = JSON.stringify({{ type, message, detail, content: content || "" }});
-  const url = new URL(DASHBOARD_URL + "/api/activity");
-  const options = {{
-    hostname: url.hostname, port: url.port || 80, path: url.pathname,
-    method: "POST", headers: {{ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }},
-  }};
-  const req = (url.protocol === "https:" ? require("https") : require("http")).request(options);
-  req.on("error", () => {{}});
-  req.write(body);
-  req.end();
+  try {{
+    const parsed = new URL(DASHBOARD_URL + "/api/activity");
+    const body = JSON.stringify({{ type, message, detail, content: content || "" }});
+    const options = {{
+      hostname: parsed.hostname,
+      port: parseInt(parsed.port) || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname,
+      method: "POST",
+      headers: {{ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }},
+    }};
+    const lib = parsed.protocol === "https:" ? https : http;
+    const req = lib.request(options);
+    req.on("error", () => {{}});
+    req.write(body);
+    req.end();
+  }} catch (e) {{}}
 }}
 
 const BANNED_WORDS = [{banned_str}];
 
 const WHITELIST = [{whitelist_str}];
 
-function escapeRegex(s) {{ return s.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\$&'); }}
+function escapeRegex(s) {{ return s.replace(/[.*+?^${{}}()|[\\]\\\\]/g, "\\\\$&"); }}
 
 function shouldDelete(text, senderPhone) {{
   if (WHITELIST.length > 0 && WHITELIST.some(p => senderPhone && senderPhone.includes(p))) return false;
   const lower = text.toLowerCase();
-  return BANNED_WORDS.some((word) => new RegExp('\\\\b' + escapeRegex(word) + '\\\\b', 'i').test(lower));
+  return BANNED_WORDS.some(word => new RegExp("\\\\b" + escapeRegex(word) + "\\\\b", "i").test(lower));
 }}
 
 const openai = new OpenAI({{ apiKey: OPENAI_API_KEY }});
@@ -554,59 +562,85 @@ const openai = new OpenAI({{ apiKey: OPENAI_API_KEY }});
 async function askChatGPT(question) {{
   try {{
     const response = await openai.chat.completions.create({{
-      model: "{gpt_model}", max_tokens: {max_tokens},
+      model: "{gpt_model}",
+      max_tokens: {max_tokens},
       messages: [
         {{ role: "system", content: "Tu es un etudiant, soit concis et de maniere jeune. Réponds en français." }},
         {{ role: "user", content: question }},
       ],
     }});
-    return response.choices[0].message.content;
-  }} catch (err) {{ return "❌ Désolé, réessaie."; }}
+    return response.choices[0].message.content.trim();
+  }} catch (err) {{
+    console.error("ChatGPT error:", err.message);
+    return "❌ Désolé, réessaie."; 
+  }}
 }}
 
 const client = new Client({{
   authStrategy: new LocalAuth({{ dataPath: "./session" }}),
-  puppeteer: {{ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }},
+  puppeteer: {{
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  }},
 }});
 
-client.on("qr", (qr) => {{ qrcode.generate(qr, {{ small: true }}); }});
+client.on("qr", (qr) => {{
+  console.log("📱 Scannez ce QR code dans WhatsApp :");
+  qrcode.generate(qr, {{ small: true }});
+}});
+
+client.on("authenticated", () => console.log("✅ Authentifié"));
+client.on("auth_failure", (msg) => console.error("❌ Échec auth :", msg));
+client.on("disconnected", (reason) => console.log("🔌 Déconnecté :", reason));
+
 client.on("ready", () => {{
   console.log("🤖 Bot prêt !");
 
-  // ── Scheduled messages — check every minute ──────────────
+  // ── Messages programmés — vérification chaque minute ─────
   setInterval(async () => {{
     const now = new Date();
     const nowH = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
-    const nowDay = now.getDay(); // 0=Sun, 1=Mon, ...
+    const nowDay = now.getDay(); // 0=Dim, 1=Lun, ...
 {scheduled_code}
   }}, 60000);
 }});
 
-client.on("message_create", async (msg) => {{
+client.on("message", async (msg) => {{
   if (msg.fromMe) return;
-  const text = msg.body || "";
-  const chat = await msg.getChat();
+  if (!msg.body) return;
+  const text = msg.body;
   const lower = text.trim().toLowerCase();
-  const contact = await msg.getContact();
-  const senderPhone = contact.number || msg.from || "";
 
+  let chat, contact, senderPhone;
+  try {{
+    chat = await msg.getChat();
+    contact = await msg.getContact();
+    senderPhone = contact.number || "";
+  }} catch (e) {{
+    console.error("getChat/getContact error:", e.message);
+    return;
+  }}
+
+  // ── Filtre mots interdits ────────────────────────────────
   if (shouldDelete(text, senderPhone)) {{
-    const name = contact.pushname || contact.number || "Quelqu'un";
+    const name = contact.pushname || contact.number || "Quelqu\'un";
     try {{ await msg.delete(true); }} catch {{}}
     try {{ await chat.sendMessage("⚠️ *" + name + "* ne respecte pas !regle"); }} catch {{}}
     logToDashboard("delete", "Message supprimé", "Mot interdit par " + name + " dans " + (chat.name || "DM"), text);
     return;
   }}
 
+  // ── Auto-réponses ────────────────────────────────────────
 {auto_replies_code}
 
-  if (lower.startsWith(BOT_PREFIX)) {{
+  // ── Commande IA ──────────────────────────────────────────
+  if (lower.startsWith(BOT_PREFIX.toLowerCase())) {{
     const question = text.slice(BOT_PREFIX.length).trim();
     if (!question) {{ await msg.reply("👋 Pose une question après *" + BOT_PREFIX + "*"); return; }}
-    await chat.sendStateTyping();
+    try {{ await chat.sendStateTyping(); }} catch {{}}
     const answer = await askChatGPT(question);
     await msg.reply("🤖 " + answer);
-    logToDashboard("command", BOT_PREFIX + " exécutée", question.substring(0, 40));
+    logToDashboard("command", BOT_PREFIX + " exécutée", question.substring(0, 80));
   }}
 }});
 
