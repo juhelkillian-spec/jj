@@ -378,6 +378,8 @@ async def generate_bot():
     auto_delete = settings.get("auto_delete", True)
     notify_group = settings.get("notify_group", True)
 
+    dashboard_url = "https://how-to-use-48.preview.emergentagent.com"
+
     banned_list = [w["word"] for w in banned_words]
     banned_str = ",\n  ".join(f'"{w}"' for w in banned_list)
 
@@ -453,8 +455,6 @@ async def generate_bot():
             licorne_lines.append(f"`{c['command']}` — {c['description']}")
         licorne_lines.append("")
     licorne_str = "\\\\n".join(licorne_lines)
-
-    dashboard_url = "https://how-to-use-48.preview.emergentagent.com"
 
     notify_line = (
         f'await chat.sendMessage(\'nhaaaaaaa ca respecte pas les regles fais !regle pour les voir\');'
