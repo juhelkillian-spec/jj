@@ -44,6 +44,14 @@ tailwind.config = {
 <!-- ─── NOTIFICATION ─── -->
 <div id="notification" class="fixed top-4 right-4 z-50 px-4 py-3 border text-sm font-mono items-center gap-2 hidden" style="transition: all 0.3s;"></div>
 
+<!-- ─── MEDIA MODAL ─── -->
+<div id="media-modal" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center hidden" onclick="closeMediaModal()">
+  <div class="max-w-2xl max-h-[80vh] p-4 relative" onclick="event.stopPropagation()">
+    <div id="media-modal-content"></div>
+    <button onclick="closeMediaModal()" class="absolute top-0 right-0 text-white text-2xl hover:text-red-400 w-8 h-8 flex items-center justify-center">✕</button>
+  </div>
+</div>
+
 <div class="min-h-screen flex">
   <!-- ─── SIDEBAR OVERLAY ─── -->
   <div id="sidebar-overlay" class="fixed inset-0 bg-black/60 z-20 hidden md:hidden" onclick="toggleSidebar()"></div>
@@ -300,6 +308,30 @@ async function renderAutoReplies(el) {
           <textarea id="ar-response" placeholder="Ce que le bot va répondre..." required rows="3"
             class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono resize-none">${esc(arForm.response)}</textarea>
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image (jpg, png, gif, webp)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="ar-image" accept="image/*" onchange="arPreviewMedia('image')" class="hidden">
+              <button type="button" onclick="document.getElementById('ar-image').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>📷</span> <span id="ar-image-label">${arForm.image_url ? 'Image sélectionnée ✓' : 'Choisir une image'}</span>
+              </button>
+              ${arForm.image_url ? '<button type="button" onclick="arRemoveMedia(\'image\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+            ${arForm.image_url ? '<div class="mt-2"><img src="' + API_BASE + arForm.image_url + '" class="max-h-20 rounded border border-white/10"></div>' : ''}
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Audio/Vidéo (mp4, mp3, ogg)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="ar-audio" accept="audio/*,video/mp4" onchange="arPreviewMedia('audio')" class="hidden">
+              <button type="button" onclick="document.getElementById('ar-audio').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>🔊</span> <span id="ar-audio-label">${arForm.audio_url ? 'Audio sélectionné ✓' : 'Choisir un audio'}</span>
+              </button>
+              ${arForm.audio_url ? '<button type="button" onclick="arRemoveMedia(\'audio\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+            ${arForm.audio_url ? '<div class="mt-2"><audio controls src="' + API_BASE + arForm.audio_url + '" class="h-8"></audio></div>' : ''}
+          </div>
+        </div>
         <div class="flex gap-3">
           <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
             ✓ ${arEditId ? 'Modifier' : 'Ajouter'}
@@ -326,6 +358,7 @@ async function renderAutoReplies(el) {
                   ${!r.active ? '<span class="font-mono text-xs text-zinc-600">[inactif]</span>' : ''}
                 </div>
                 <p class="text-zinc-400 text-sm truncate">${esc(r.response)}</p>
+                ${r.image_url || r.audio_url ? '<div class="flex gap-2 mt-1">' + (r.image_url ? '<button onclick="showMediaModal(\'image\',\'' + r.image_url + '\')" class="font-mono text-xs px-1.5 py-0.5 border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer">📷 Image</button>' : '') + (r.audio_url ? '<button onclick="showMediaModal(\'audio\',\'' + r.audio_url + '\')" class="font-mono text-xs px-1.5 py-0.5 border border-violet-500/20 bg-violet-500/5 text-violet-400 hover:bg-violet-500/10 transition-colors cursor-pointer">🔊 Audio</button>' : '') + '</div>' : ''}
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button onclick="arToggle('${r.id}',${r.active})" class="text-sm transition-colors ${r.active ? 'text-emerald-400 hover:text-emerald-300' : 'text-zinc-600 hover:text-zinc-400'}" title="Activer/Désactiver">
@@ -346,13 +379,32 @@ function arToggleForm() {
   renderAutoReplies(document.getElementById('content'));
 }
 
+async function arPreviewMedia(type) {
+  const input = document.getElementById(type === 'image' ? 'ar-image' : 'ar-audio');
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const result = await apiUpload(file);
+    if (type === 'image') arForm.image_url = result.url;
+    else arForm.audio_url = result.url;
+    notify(type === 'image' ? 'Image uploadée !' : 'Audio uploadé !');
+    renderAutoReplies(document.getElementById('content'));
+  } catch { notify('Erreur upload', 'error'); }
+}
+
+function arRemoveMedia(type) {
+  if (type === 'image') arForm.image_url = null;
+  else arForm.audio_url = null;
+  renderAutoReplies(document.getElementById('content'));
+}
+
 async function arSubmit(e) {
   e.preventDefault();
-  const form = { trigger: document.getElementById('ar-trigger').value, response: document.getElementById('ar-response').value, type: document.getElementById('ar-type').value, active: true };
+  const form = { trigger: document.getElementById('ar-trigger').value, response: document.getElementById('ar-response').value, type: document.getElementById('ar-type').value, active: true, image_url: arForm.image_url || null, audio_url: arForm.audio_url || null };
   try {
     if (arEditId) { await apiPut(`/auto-replies/${arEditId}`, form); notify('Auto-réponse modifiée !'); }
     else { await apiPost('/auto-replies', form); notify('Auto-réponse ajoutée !'); }
-    arShowForm = false; arEditId = null; arForm = { trigger: '', response: '', type: 'exact', active: true };
+    arShowForm = false; arEditId = null; arForm = { trigger: '', response: '', type: 'exact', active: true, image_url: null, audio_url: null };
     renderAutoReplies(document.getElementById('content'));
   } catch { notify('Erreur', 'error'); }
 }
@@ -365,7 +417,7 @@ async function arToggle(id, active) {
 function arEdit(id) {
   const r = arData.find(x => x.id === id);
   if (!r) return;
-  arForm = { trigger: r.trigger, response: r.response, type: r.type, active: r.active };
+  arForm = { trigger: r.trigger, response: r.response, type: r.type, active: r.active, image_url: r.image_url || null, audio_url: r.audio_url || null };
   arEditId = id; arShowForm = true;
   renderAutoReplies(document.getElementById('content'));
 }
@@ -378,7 +430,7 @@ async function arDel(id) {
 }
 
 // ── BANNED WORDS ────────────────────────────────────────────
-let bwData = [], bwTab = 'insultes', bwNew = '';
+let bwData = [], bwTab = 'insultes', bwNew = '', bwImageUrl = null, bwAudioUrl = null;
 
 async function renderBannedWords(el) {
   try { bwData = await apiGet('/banned-words'); } catch {}
@@ -410,12 +462,36 @@ async function renderBannedWords(el) {
           </button>
         `).join('')}
       </div>
-      <form onsubmit="bwAdd(event)" class="flex gap-3">
-        <input id="bw-input" value="${esc(bwNew)}" placeholder="Ajouter un mot (${bwTab})..."
-          class="flex-1 bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
-        <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
-          + Ajouter
-        </button>
+      <form onsubmit="bwAdd(event)" class="space-y-3">
+        <div class="flex gap-3">
+          <input id="bw-input" value="${esc(bwNew)}" placeholder="Ajouter un mot (${bwTab})..."
+            class="flex-1 bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+          <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
+            + Ajouter
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image d’avertissement (optionnel)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="bw-image" accept="image/*" onchange="bwPreviewMedia('image')" class="hidden">
+              <button type="button" onclick="document.getElementById('bw-image').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>📷</span> <span id="bw-image-label">${bwImageUrl ? 'Image sélectionnée ✓' : 'Choisir une image'}</span>
+              </button>
+              ${bwImageUrl ? '<button type="button" onclick="bwRemoveMedia(\'image\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Audio d’avertissement (optionnel)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="bw-audio" accept="audio/*,video/mp4" onchange="bwPreviewMedia('audio')" class="hidden">
+              <button type="button" onclick="document.getElementById('bw-audio').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>🔊</span> <span id="bw-audio-label">${bwAudioUrl ? 'Audio sélectionné ✓' : 'Choisir un audio'}</span>
+              </button>
+              ${bwAudioUrl ? '<button type="button" onclick="bwRemoveMedia(\'audio\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+          </div>
+        </div>
       </form>
       <div class="flex flex-wrap gap-2">
         ${current.length === 0 ? '<p class="text-zinc-600 font-mono text-sm py-4">Aucun mot dans cette catégorie</p>' :
@@ -429,14 +505,33 @@ async function renderBannedWords(el) {
     </div>`;
 }
 
+async function bwPreviewMedia(type) {
+  const input = document.getElementById(type === 'image' ? 'bw-image' : 'bw-audio');
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const result = await apiUpload(file);
+    if (type === 'image') bwImageUrl = result.url;
+    else bwAudioUrl = result.url;
+    notify(type === 'image' ? 'Image uploadée !' : 'Audio uploadé !');
+    renderBannedWords(document.getElementById('content'));
+  } catch { notify('Erreur upload', 'error'); }
+}
+
+function bwRemoveMedia(type) {
+  if (type === 'image') bwImageUrl = null;
+  else bwAudioUrl = null;
+  renderBannedWords(document.getElementById('content'));
+}
+
 async function bwAdd(e) {
   e.preventDefault();
   const word = document.getElementById('bw-input').value.trim();
   if (!word) return;
   try {
-    await apiPost('/banned-words', { word, category: bwTab });
+    await apiPost('/banned-words', { word, category: bwTab, image_url: bwImageUrl || null, audio_url: bwAudioUrl || null });
     notify(`"${word}" ajouté !`);
-    bwNew = '';
+    bwNew = ''; bwImageUrl = null; bwAudioUrl = null;
     renderBannedWords(document.getElementById('content'));
   } catch (err) { notify(err.message, 'error'); }
 }
@@ -449,7 +544,7 @@ async function bwDel(id, word) {
 
 // ── COMMANDS ────────────────────────────────────────────────
 let cmdData = [], cmdFilter = 'Tous', cmdShowForm = false, cmdEditId = null;
-let cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true };
+let cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true, image_url: null, audio_url: null };
 const CATS = ['Tous', 'IA', 'Fun', 'Jeux', 'Utile'];
 const CAT_COLORS = {
   IA: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/30' },
@@ -505,6 +600,30 @@ async function renderCommands(el) {
             ${['IA', 'Fun', 'Jeux', 'Utile'].map(c => `<option value="${c}" ${cmdForm.category === c ? 'selected' : ''}>${c}</option>`).join('')}
           </select>
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Image (jpg, png, gif, webp)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="cmd-image" accept="image/*" onchange="cmdPreviewMedia('image')" class="hidden">
+              <button type="button" onclick="document.getElementById('cmd-image').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>📷</span> <span id="cmd-image-label">${cmdForm.image_url ? 'Image sélectionnée ✓' : 'Choisir une image'}</span>
+              </button>
+              ${cmdForm.image_url ? '<button type="button" onclick="cmdRemoveMedia(\'image\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+            ${cmdForm.image_url ? '<div class="mt-2"><img src="' + API_BASE + cmdForm.image_url + '" class="max-h-20 rounded border border-white/10"></div>' : ''}
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Audio/Vidéo (mp4, mp3, ogg)</label>
+            <div class="flex items-center gap-2">
+              <input type="file" id="cmd-audio" accept="audio/*,video/mp4" onchange="cmdPreviewMedia('audio')" class="hidden">
+              <button type="button" onclick="document.getElementById('cmd-audio').click()" class="flex-1 flex items-center gap-2 px-3 py-2 bg-[#030305] border border-white/10 text-zinc-500 text-sm hover:border-emerald-500/50 transition-colors font-mono">
+                <span>🔊</span> <span id="cmd-audio-label">${cmdForm.audio_url ? 'Audio sélectionné ✓' : 'Choisir un audio'}</span>
+              </button>
+              ${cmdForm.audio_url ? '<button type="button" onclick="cmdRemoveMedia(\'audio\')" class="text-red-400 hover:text-red-300 text-sm px-2">✕</button>' : ''}
+            </div>
+            ${cmdForm.audio_url ? '<div class="mt-2"><audio controls src="' + API_BASE + cmdForm.audio_url + '" class="h-8"></audio></div>' : ''}
+          </div>
+        </div>
         <div class="flex gap-3">
           <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">✓ ${cmdEditId ? 'Modifier' : 'Ajouter'}</button>
           <button type="button" onclick="cmdToggleForm()" class="px-4 py-2 border border-white/10 text-white text-sm hover:border-white/30 transition-colors">Annuler</button>
@@ -531,6 +650,7 @@ async function renderCommands(el) {
                   ${badge(c.category)}
                 </div>
                 <p class="text-zinc-400 text-sm">${esc(c.description)}</p>
+                ${c.image_url || c.audio_url ? '<div class="flex gap-2 mt-1">' + (c.image_url ? '<button onclick="showMediaModal(\'image\',\'' + c.image_url + '\')" class="font-mono text-xs px-1.5 py-0.5 border border-cyan-500/20 bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500/10 transition-colors cursor-pointer">📷 Image</button>' : '') + (c.audio_url ? '<button onclick="showMediaModal(\'audio\',\'' + c.audio_url + '\')" class="font-mono text-xs px-1.5 py-0.5 border border-violet-500/20 bg-violet-500/5 text-violet-400 hover:bg-violet-500/10 transition-colors cursor-pointer">🔊 Audio</button>' : '') + '</div>' : ''}
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button onclick="cmdToggle('${c.id}',${c.active})" class="text-sm transition-colors ${c.active ? 'text-emerald-400' : 'text-zinc-600'}" title="Activer/Désactiver">${c.active ? '◉' : '◎'}</button>
@@ -545,7 +665,26 @@ async function renderCommands(el) {
 
 function cmdToggleForm() {
   cmdShowForm = !cmdShowForm;
-  if (!cmdShowForm) { cmdEditId = null; cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true }; }
+  if (!cmdShowForm) { cmdEditId = null; cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true, image_url: null, audio_url: null }; }
+  renderCommands(document.getElementById('content'));
+}
+
+async function cmdPreviewMedia(type) {
+  const input = document.getElementById(type === 'image' ? 'cmd-image' : 'cmd-audio');
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const result = await apiUpload(file);
+    if (type === 'image') cmdForm.image_url = result.url;
+    else cmdForm.audio_url = result.url;
+    notify(type === 'image' ? 'Image uploadée !' : 'Audio uploadé !');
+    renderCommands(document.getElementById('content'));
+  } catch { notify('Erreur upload', 'error'); }
+}
+
+function cmdRemoveMedia(type) {
+  if (type === 'image') cmdForm.image_url = null;
+  else cmdForm.audio_url = null;
   renderCommands(document.getElementById('content'));
 }
 
@@ -556,12 +695,14 @@ async function cmdSubmit(e) {
     description: document.getElementById('cmd-desc').value,
     category: document.getElementById('cmd-cat').value,
     emoji: document.getElementById('cmd-emoji').value || '🤖',
-    active: true
+    active: true,
+    image_url: cmdForm.image_url || null,
+    audio_url: cmdForm.audio_url || null
   };
   try {
     if (cmdEditId) { await apiPut(`/commands/${cmdEditId}`, form); notify('Commande modifiée !'); }
     else { await apiPost('/commands', form); notify('Commande ajoutée !'); }
-    cmdShowForm = false; cmdEditId = null;
+    cmdShowForm = false; cmdEditId = null; cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true, image_url: null, audio_url: null };
     renderCommands(document.getElementById('content'));
   } catch { notify('Erreur', 'error'); }
 }
@@ -574,7 +715,7 @@ async function cmdToggle(id, active) {
 function cmdEdit(id) {
   const c = cmdData.find(x => x.id === id);
   if (!c) return;
-  cmdForm = { command: c.command, description: c.description, category: c.category, emoji: c.emoji, active: c.active };
+  cmdForm = { command: c.command, description: c.description, category: c.category, emoji: c.emoji, active: c.active, image_url: c.image_url || null, audio_url: c.audio_url || null };
   cmdEditId = id; cmdShowForm = true;
   renderCommands(document.getElementById('content'));
 }
@@ -813,6 +954,23 @@ function downloadGen() {
   const a = document.createElement('a');
   a.href = url; a.download = 'index.js'; a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── MEDIA MODAL ──────────────────────────────────────────────
+function showMediaModal(type, url) {
+  const modal = document.getElementById('media-modal');
+  const content = document.getElementById('media-modal-content');
+  if (type === 'image') {
+    content.innerHTML = '<img src="' + API_BASE + url + '" class="max-w-full max-h-[70vh] object-contain">';
+  } else {
+    content.innerHTML = '<audio controls autoplay src="' + API_BASE + url + '" class="w-96"></audio>';
+  }
+  modal.classList.remove('hidden');
+}
+
+function closeMediaModal() {
+  document.getElementById('media-modal').classList.add('hidden');
+  document.getElementById('media-modal-content').innerHTML = '';
 }
 
 // ── UTILS ───────────────────────────────────────────────────
