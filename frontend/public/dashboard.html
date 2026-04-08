@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CROUS BOT — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: {
+        heading: ['Unbounded', 'sans-serif'],
+        body: ['Manrope', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Manrope', sans-serif; background: #030305; color: #fff; }
+  .font-heading { font-family: 'Unbounded', sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+  @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+  .animate-ping { animation: ping 1s cubic-bezier(0,0,0.2,1) infinite; }
+  .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  select option { background: #0B0B10; color: #fff; }
+  input::placeholder, textarea::placeholder { color: #52525b; }
+  pre { white-space: pre-wrap; word-break: break-all; }
+  .nav-btn { transition: all 0.2s; }
+  .nav-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
+  .nav-btn.active { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.4); color: #10B981; }
+</style>
+</head>
+<body>
+<!-- ─── NOTIFICATION ─── -->
+<div id="notification" class="fixed top-4 right-4 z-50 px-4 py-3 border text-sm font-mono items-center gap-2 hidden" style="transition: all 0.3s;"></div>
+
+<div class="min-h-screen flex">
+  <!-- ─── SIDEBAR OVERLAY ─── -->
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/60 z-20 hidden md:hidden" onclick="toggleSidebar()"></div>
+
+  <!-- ─── SIDEBAR ─── -->
+  <aside id="sidebar" class="fixed md:static top-0 left-0 h-full z-30 w-64 bg-[#0B0B10]/70 backdrop-blur-xl border-r border-white/5 flex flex-col -translate-x-full md:translate-x-0 transition-transform duration-300 shrink-0">
+    <div class="p-6 border-b border-white/5">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-emerald-500 flex items-center justify-center">
+          <svg width="18" height="18" viewBox="0 0 256 256" fill="black"><path d="M200,48H136V16a8,8,0,0,0-16,0V48H56A32,32,0,0,0,24,80V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V80A32,32,0,0,0,200,48ZM104,176a24,24,0,1,1,24-24A24,24,0,0,1,104,176Zm72-56H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Z"/></svg>
+        </div>
+        <div>
+          <div class="text-white font-black text-sm font-heading">CROUS BOT</div>
+          <div class="text-zinc-500 text-xs font-mono">Dashboard v2.0</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 p-4 space-y-1" id="nav-items"></nav>
+    <div class="p-4 border-t border-white/5">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span class="font-mono text-xs text-zinc-500">whatsapp-web.js</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ─── MAIN ─── -->
+  <main class="flex-1 flex flex-col min-w-0">
+    <header class="border-b border-white/5 px-6 py-4 flex items-center gap-4">
+      <button class="md:hidden text-zinc-500 hover:text-white" onclick="toggleSidebar()">
+        <div class="space-y-1.5"><div class="w-5 h-0.5 bg-current"></div><div class="w-5 h-0.5 bg-current"></div><div class="w-5 h-0.5 bg-current"></div></div>
+      </button>
+      <span class="font-mono text-xs text-zinc-600 uppercase tracking-widest" id="header-label"></span>
+      <div class="ml-auto flex items-center gap-2">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span class="font-mono text-xs text-emerald-400">En ligne</span>
+      </div>
+    </header>
+    <div class="flex-1 p-6 md:p-8 overflow-auto scrollbar-thin" id="content"></div>
+  </main>
+</div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────
+// CHANGE THIS to your backend URL
+const API_BASE = '';
+const API = API_BASE + '/api';
+
+// ── STATE ───────────────────────────────────────────────────
+let currentSection = 'overview';
+let statsData = {};
+let activityData = [];
+
+// ── NAV ─────────────────────────────────────────────────────
+const NAV = [
+  { id: 'overview', label: "Vue d'ensemble", icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8H96a8,8,0,0,0,8-8V160h48v56a8,8,0,0,0,8,8h56a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68Z"/></svg>` },
+  { id: 'autoreplies', label: 'Auto-Réponses', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M232,128A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Z"/></svg>` },
+  { id: 'banned', label: 'Mots Bannis', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,16.37A88.36,88.36,0,0,1,144,36v40a8,8,0,0,1-8,8H88a8,8,0,0,1-6.91-4L64.46,52A87.86,87.86,0,0,1,120,40.37ZM40,128a87.34,87.34,0,0,1,8.54-37.75L81.19,148a8,8,0,0,1,.35.72l22.84,42.82A88.14,88.14,0,0,1,40,128Zm88,88a87.48,87.48,0,0,1-31.31-5.76l26.41-44A8,8,0,0,1,136,160h52.63l18.84,31.29A87.86,87.86,0,0,1,128,216Z"/></svg>` },
+  { id: 'commands', label: 'Commandes', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M120,137.74,24.15,201a8,8,0,0,1-8.3-13.68L111.7,128,15.85,68.72a8,8,0,0,1,8.3-13.68L120,118.26ZM128,192a8,8,0,0,0,0,16h104a8,8,0,0,0,0-16Z"/></svg>` },
+  { id: 'settings', label: 'Paramètres', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Z"/></svg>` },
+  { id: 'generator', label: 'Générateur', icon: `<svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z"/></svg>` },
+];
+
+function buildNav() {
+  const container = document.getElementById('nav-items');
+  container.innerHTML = NAV.map(item => `
+    <button onclick="navigate('${item.id}')" class="nav-btn w-full flex items-center gap-3 px-3 py-2.5 text-sm border ${currentSection === item.id ? 'active' : 'text-zinc-500 border-transparent'}">
+      <span class="${currentSection === item.id ? 'text-emerald-400' : 'text-zinc-600'}">${item.icon}</span>
+      <span class="font-mono text-xs uppercase tracking-wider">${item.label}</span>
+      ${currentSection === item.id ? '<span class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400"></span>' : ''}
+    </button>
+  `).join('');
+}
+
+function navigate(section) {
+  currentSection = section;
+  document.getElementById('header-label').textContent = NAV.find(n => n.id === section)?.label || '';
+  buildNav();
+  renderSection();
+  // Close mobile sidebar
+  document.getElementById('sidebar').classList.add('-translate-x-full');
+  document.getElementById('sidebar-overlay').classList.add('hidden');
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  sb.classList.toggle('-translate-x-full');
+  ov.classList.toggle('hidden');
+}
+
+// ── NOTIFICATION ────────────────────────────────────────────
+function notify(msg, type = 'success') {
+  const el = document.getElementById('notification');
+  const colors = type === 'success' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'bg-red-500/10 border-red-500/40 text-red-400';
+  const icon = type === 'success' ? '✓' : '✕';
+  el.className = `fixed top-4 right-4 z-50 px-4 py-3 border text-sm font-mono flex items-center gap-2 ${colors}`;
+  el.innerHTML = `${icon} ${msg}`;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+// ── FETCH HELPERS ───────────────────────────────────────────
+async function apiGet(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Erreur'); }
+  return r.json();
+}
+async function apiPut(path, body) {
+  const r = await fetch(API + path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function apiDelete(path) {
+  const r = await fetch(API + path, { method: 'DELETE' });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function apiUpload(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch(API + '/upload', { method: 'POST', body: fd });
+  if (!r.ok) throw new Error('Upload failed');
+  return r.json();
+}
+
+// ── RENDER ROUTER ───────────────────────────────────────────
+async function renderSection() {
+  const el = document.getElementById('content');
+  switch (currentSection) {
+    case 'overview': await renderOverview(el); break;
+    case 'autoreplies': await renderAutoReplies(el); break;
+    case 'banned': await renderBannedWords(el); break;
+    case 'commands': await renderCommands(el); break;
+    case 'settings': await renderSettings(el); break;
+    case 'generator': renderGenerator(el); break;
+  }
+}
+
+// ── OVERVIEW ────────────────────────────────────────────────
+async function renderOverview(el) {
+  try {
+    const [stats, activity] = await Promise.all([apiGet('/stats'), apiGet('/activity')]);
+    statsData = stats;
+    activityData = activity;
+  } catch (e) {
+    el.innerHTML = `<div class="text-red-400 font-mono text-sm text-center py-16">Erreur de connexion au backend.<br><span class="text-zinc-500 text-xs mt-2 block">Vérifiez que votre API est lancée et que API_BASE est correct.</span></div>`;
+    return;
+  }
+
+  const logColors = { delete: 'text-red-400', autoreply: 'text-emerald-400', command: 'text-cyan-400' };
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">État du système</p>
+        <h2 class="text-2xl font-black text-white font-heading">Vue d'ensemble</h2>
+      </div>
+      <div class="flex items-center gap-3 p-4 border border-white/5 bg-[#0B0B10]">
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <span class="text-emerald-400 font-mono text-sm font-bold">BOT EN LIGNE</span>
+        <span class="ml-auto text-zinc-500 font-mono text-xs">WhatsApp Bot — CROUS</span>
+      </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        ${statCard('Auto-réponses', statsData.auto_replies ?? '—', 'actives', true)}
+        ${statCard('Mots bannis', statsData.banned_words ?? '—', `${statsData.banned_insultes ?? 0} insultes · ${statsData.banned_religieux ?? 0} religieux`)}
+        ${statCard('Commandes', statsData.commands ?? '—', 'disponibles')}
+        ${statCard('Messages sup.', statsData.messages_deleted ?? '—', 'depuis le début')}
+      </div>
+      <div class="border border-emerald-500/20 bg-black">
+        <div class="border-b border-emerald-500/20 px-4 py-3 flex items-center gap-2">
+          <span class="text-emerald-400">›</span>
+          <span class="font-mono text-xs uppercase tracking-widest text-emerald-400">Journal d'activité</span>
+          <span class="ml-auto font-mono text-xs text-zinc-600">${activityData.length} entrées</span>
+        </div>
+        <div class="p-4 space-y-2 max-h-72 overflow-y-auto scrollbar-thin font-mono">
+          ${activityData.length === 0 ? '<p class="text-zinc-600 text-sm text-center py-4">Aucune activité enregistrée</p>' :
+            activityData.map(log => `
+              <div class="flex items-start gap-3 text-sm">
+                <span class="text-zinc-700 shrink-0 text-xs mt-0.5">${new Date(log.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                <span class="shrink-0 ${logColors[log.type] || 'text-zinc-400'}">›</span>
+                <span class="text-zinc-300">${esc(log.message)}</span>
+                ${log.detail ? `<span class="text-zinc-600 text-xs ml-auto hidden sm:inline">${esc(log.detail)}</span>` : ''}
+              </div>
+            `).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function statCard(label, value, sub, accent = false) {
+  return `<div class="p-5 border transition-all duration-200 hover:-translate-y-0.5 ${accent ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-white/5 bg-[#0B0B10]'}">
+    <div class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-3">${label}</div>
+    <div class="text-3xl font-black font-mono ${accent ? 'text-emerald-400' : 'text-white'}">${value}</div>
+    ${sub ? `<div class="text-xs text-zinc-600 mt-1 font-mono">${sub}</div>` : ''}
+  </div>`;
+}
+
+// ── AUTO-REPLIES ────────────────────────────────────────────
+let arData = [], arSearch = '', arShowForm = false, arEditId = null;
+let arForm = { trigger: '', response: '', type: 'exact', active: true, image_url: null, audio_url: null };
+
+async function renderAutoReplies(el) {
+  try { arData = await apiGet('/auto-replies'); } catch {}
+  const filtered = arData.filter(r =>
+    r.trigger.toLowerCase().includes(arSearch.toLowerCase()) ||
+    r.response.toLowerCase().includes(arSearch.toLowerCase())
+  );
+  const typeLabels = { exact: 'Exact', contains: 'Contient', regex: 'Regex' };
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div class="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Automatisation</p>
+          <h2 class="text-2xl font-black text-white font-heading">Auto-Réponses</h2>
+        </div>
+        <button onclick="arToggleForm()" class="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+          + Ajouter
+        </button>
+      </div>
+
+      ${arShowForm ? `
+      <form onsubmit="arSubmit(event)" class="p-5 border border-emerald-500/30 bg-[#0B0B10] space-y-4">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">${arEditId ? 'Modifier' : 'Nouvelle auto-réponse'}</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Déclencheur</label>
+            <input id="ar-trigger" value="${esc(arForm.trigger)}" placeholder="mot ou phrase" required
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono">
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Type</label>
+            <select id="ar-type" class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+              <option value="exact" ${arForm.type === 'exact' ? 'selected' : ''}>Exact</option>
+              <option value="contains" ${arForm.type === 'contains' ? 'selected' : ''}>Contient</option>
+              <option value="regex" ${arForm.type === 'regex' ? 'selected' : ''}>Regex</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Réponse texte</label>
+          <textarea id="ar-response" placeholder="Ce que le bot va répondre..." required rows="3"
+            class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono resize-none">${esc(arForm.response)}</textarea>
+        </div>
+        <div class="flex gap-3">
+          <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
+            ✓ ${arEditId ? 'Modifier' : 'Ajouter'}
+          </button>
+          <button type="button" onclick="arToggleForm()" class="px-4 py-2 border border-white/10 text-white text-sm hover:border-white/30 transition-colors">Annuler</button>
+        </div>
+      </form>` : ''}
+
+      <div class="relative">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">⌕</span>
+        <input oninput="arSearch=this.value;renderAutoReplies(document.getElementById('content'))" value="${esc(arSearch)}"
+          placeholder="Rechercher..."
+          class="w-full bg-[#030305] border border-white/10 text-white pl-9 pr-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+      </div>
+
+      <div class="space-y-2">
+        ${filtered.length === 0 ? '<p class="text-zinc-600 font-mono text-sm text-center py-8">Aucune auto-réponse trouvée</p>' :
+          filtered.map(r => `
+            <div class="flex items-center gap-4 p-4 border transition-all duration-200 ${r.active ? 'border-white/5 bg-[#0B0B10]' : 'border-white/5 bg-[#030305] opacity-50'}">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="font-mono text-sm text-white font-bold">"${esc(r.trigger)}"</span>
+                  <span class="font-mono text-xs px-1.5 py-0.5 border border-white/10 text-zinc-500">${typeLabels[r.type] || r.type}</span>
+                  ${!r.active ? '<span class="font-mono text-xs text-zinc-600">[inactif]</span>' : ''}
+                </div>
+                <p class="text-zinc-400 text-sm truncate">${esc(r.response)}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button onclick="arToggle('${r.id}',${r.active})" class="text-sm transition-colors ${r.active ? 'text-emerald-400 hover:text-emerald-300' : 'text-zinc-600 hover:text-zinc-400'}" title="Activer/Désactiver">
+                  ${r.active ? '◉' : '◎'}
+                </button>
+                <button onclick="arEdit('${r.id}')" class="text-zinc-500 hover:text-white transition-colors p-1" title="Modifier">✎</button>
+                <button onclick="arDel('${r.id}')" class="text-zinc-500 hover:text-red-400 transition-colors p-1" title="Supprimer">✕</button>
+              </div>
+            </div>
+          `).join('')}
+      </div>
+    </div>`;
+}
+
+function arToggleForm() {
+  arShowForm = !arShowForm;
+  if (!arShowForm) { arEditId = null; arForm = { trigger: '', response: '', type: 'exact', active: true, image_url: null, audio_url: null }; }
+  renderAutoReplies(document.getElementById('content'));
+}
+
+async function arSubmit(e) {
+  e.preventDefault();
+  const form = { trigger: document.getElementById('ar-trigger').value, response: document.getElementById('ar-response').value, type: document.getElementById('ar-type').value, active: true };
+  try {
+    if (arEditId) { await apiPut(`/auto-replies/${arEditId}`, form); notify('Auto-réponse modifiée !'); }
+    else { await apiPost('/auto-replies', form); notify('Auto-réponse ajoutée !'); }
+    arShowForm = false; arEditId = null; arForm = { trigger: '', response: '', type: 'exact', active: true };
+    renderAutoReplies(document.getElementById('content'));
+  } catch { notify('Erreur', 'error'); }
+}
+
+async function arToggle(id, active) {
+  await apiPut(`/auto-replies/${id}`, { active: !active });
+  renderAutoReplies(document.getElementById('content'));
+}
+
+function arEdit(id) {
+  const r = arData.find(x => x.id === id);
+  if (!r) return;
+  arForm = { trigger: r.trigger, response: r.response, type: r.type, active: r.active };
+  arEditId = id; arShowForm = true;
+  renderAutoReplies(document.getElementById('content'));
+}
+
+async function arDel(id) {
+  if (!confirm('Supprimer cette auto-réponse ?')) return;
+  await apiDelete(`/auto-replies/${id}`);
+  notify('Supprimée !');
+  renderAutoReplies(document.getElementById('content'));
+}
+
+// ── BANNED WORDS ────────────────────────────────────────────
+let bwData = [], bwTab = 'insultes', bwNew = '';
+
+async function renderBannedWords(el) {
+  try { bwData = await apiGet('/banned-words'); } catch {}
+  const insultes = bwData.filter(w => w.category === 'insultes');
+  const religieux = bwData.filter(w => w.category === 'religieux');
+  const current = bwTab === 'insultes' ? insultes : religieux;
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Modération</p>
+        <h2 class="text-2xl font-black text-white font-heading">Mots Bannis</h2>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="p-4 border border-white/5 bg-[#0B0B10]">
+          <div class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Insultes</div>
+          <div class="text-2xl font-black text-red-400 font-mono">${insultes.length}</div>
+        </div>
+        <div class="p-4 border border-white/5 bg-[#0B0B10]">
+          <div class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Religieux</div>
+          <div class="text-2xl font-black text-amber-400 font-mono">${religieux.length}</div>
+        </div>
+      </div>
+      <div class="flex border-b border-white/5">
+        ${['insultes', 'religieux'].map(t => `
+          <button onclick="bwTab='${t}';renderBannedWords(document.getElementById('content'))"
+            class="px-5 py-2.5 font-mono text-sm uppercase tracking-wider transition-colors border-b-2 ${bwTab === t ? 'text-emerald-400 border-emerald-500' : 'text-zinc-500 border-transparent hover:text-white'}">
+            ${t} <span class="ml-1 text-xs opacity-60">(${t === 'insultes' ? insultes.length : religieux.length})</span>
+          </button>
+        `).join('')}
+      </div>
+      <form onsubmit="bwAdd(event)" class="flex gap-3">
+        <input id="bw-input" value="${esc(bwNew)}" placeholder="Ajouter un mot (${bwTab})..."
+          class="flex-1 bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+        <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
+          + Ajouter
+        </button>
+      </form>
+      <div class="flex flex-wrap gap-2">
+        ${current.length === 0 ? '<p class="text-zinc-600 font-mono text-sm py-4">Aucun mot dans cette catégorie</p>' :
+          current.map(w => `
+            <div class="group flex items-center gap-2 px-3 py-1.5 border font-mono text-sm ${bwTab === 'insultes' ? 'border-red-500/20 bg-red-500/5 text-red-300' : 'border-amber-500/20 bg-amber-500/5 text-amber-300'}">
+              ${esc(w.word)}
+              <button onclick="bwDel('${w.id}','${esc(w.word)}')" class="opacity-0 group-hover:opacity-100 transition-opacity hover:text-white ml-1">✕</button>
+            </div>
+          `).join('')}
+      </div>
+    </div>`;
+}
+
+async function bwAdd(e) {
+  e.preventDefault();
+  const word = document.getElementById('bw-input').value.trim();
+  if (!word) return;
+  try {
+    await apiPost('/banned-words', { word, category: bwTab });
+    notify(`"${word}" ajouté !`);
+    bwNew = '';
+    renderBannedWords(document.getElementById('content'));
+  } catch (err) { notify(err.message, 'error'); }
+}
+
+async function bwDel(id, word) {
+  await apiDelete(`/banned-words/${id}`);
+  notify(`"${word}" supprimé`);
+  renderBannedWords(document.getElementById('content'));
+}
+
+// ── COMMANDS ────────────────────────────────────────────────
+let cmdData = [], cmdFilter = 'Tous', cmdShowForm = false, cmdEditId = null;
+let cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true };
+const CATS = ['Tous', 'IA', 'Fun', 'Jeux', 'Utile'];
+const CAT_COLORS = {
+  IA: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+  Fun: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+  Jeux: { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/30' },
+  Utile: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30' },
+};
+
+function badge(cat) {
+  const c = CAT_COLORS[cat] || CAT_COLORS.Fun;
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono uppercase tracking-wider border ${c.bg} ${c.text} ${c.border}">${cat}</span>`;
+}
+
+async function renderCommands(el) {
+  try { cmdData = await apiGet('/commands'); } catch {}
+  const filtered = cmdFilter === 'Tous' ? cmdData : cmdData.filter(c => c.category === cmdFilter);
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div class="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Commandes Bot</p>
+          <h2 class="text-2xl font-black text-white font-heading">Commandes</h2>
+        </div>
+        <button onclick="cmdToggleForm()" class="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+          + Nouvelle commande
+        </button>
+      </div>
+
+      ${cmdShowForm ? `
+      <form onsubmit="cmdSubmit(event)" class="p-5 border border-emerald-500/30 bg-[#0B0B10] space-y-4">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">${cmdEditId ? 'Modifier la commande' : 'Nouvelle commande'}</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Emoji</label>
+            <input id="cmd-emoji" value="${esc(cmdForm.emoji)}" placeholder="🤖" maxlength="4"
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-lg focus:border-emerald-500 focus:outline-none">
+          </div>
+          <div class="md:col-span-2">
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Commande</label>
+            <input id="cmd-name" value="${esc(cmdForm.command)}" placeholder="!macommande [param]" required
+              class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+          </div>
+        </div>
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Description</label>
+          <input id="cmd-desc" value="${esc(cmdForm.description)}" placeholder="Ce que fait cette commande..." required
+            class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+        </div>
+        <div>
+          <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Catégorie</label>
+          <select id="cmd-cat" class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+            ${['IA', 'Fun', 'Jeux', 'Utile'].map(c => `<option value="${c}" ${cmdForm.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="flex gap-3">
+          <button type="submit" class="px-4 py-2 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">✓ ${cmdEditId ? 'Modifier' : 'Ajouter'}</button>
+          <button type="button" onclick="cmdToggleForm()" class="px-4 py-2 border border-white/10 text-white text-sm hover:border-white/30 transition-colors">Annuler</button>
+        </div>
+      </form>` : ''}
+
+      <div class="flex flex-wrap gap-2">
+        ${CATS.map(cat => `
+          <button onclick="cmdFilter='${cat}';renderCommands(document.getElementById('content'))"
+            class="px-3 py-1.5 text-xs font-mono uppercase tracking-wider border transition-colors ${cmdFilter === cat ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' : 'border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-300'}">
+            ${cat}
+          </button>
+        `).join('')}
+      </div>
+
+      <div class="space-y-2">
+        ${filtered.length === 0 ? '<p class="text-zinc-600 font-mono text-sm text-center py-8">Aucune commande dans cette catégorie</p>' :
+          filtered.map(c => `
+            <div class="flex items-center gap-4 p-4 border transition-all duration-200 ${c.active ? 'border-white/5 bg-[#0B0B10] hover:border-white/10' : 'border-white/5 bg-[#030305] opacity-40'}">
+              <span class="text-2xl">${c.emoji}</span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="font-mono text-sm text-white">${esc(c.command)}</span>
+                  ${badge(c.category)}
+                </div>
+                <p class="text-zinc-400 text-sm">${esc(c.description)}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button onclick="cmdToggle('${c.id}',${c.active})" class="text-sm transition-colors ${c.active ? 'text-emerald-400' : 'text-zinc-600'}" title="Activer/Désactiver">${c.active ? '◉' : '◎'}</button>
+                <button onclick="cmdEdit('${c.id}')" class="text-zinc-500 hover:text-white transition-colors p-1" title="Modifier">✎</button>
+                <button onclick="cmdDel('${c.id}')" class="text-zinc-500 hover:text-red-400 transition-colors p-1" title="Supprimer">✕</button>
+              </div>
+            </div>
+          `).join('')}
+      </div>
+    </div>`;
+}
+
+function cmdToggleForm() {
+  cmdShowForm = !cmdShowForm;
+  if (!cmdShowForm) { cmdEditId = null; cmdForm = { command: '', description: '', category: 'Fun', emoji: '🤖', active: true }; }
+  renderCommands(document.getElementById('content'));
+}
+
+async function cmdSubmit(e) {
+  e.preventDefault();
+  const form = {
+    command: document.getElementById('cmd-name').value,
+    description: document.getElementById('cmd-desc').value,
+    category: document.getElementById('cmd-cat').value,
+    emoji: document.getElementById('cmd-emoji').value || '🤖',
+    active: true
+  };
+  try {
+    if (cmdEditId) { await apiPut(`/commands/${cmdEditId}`, form); notify('Commande modifiée !'); }
+    else { await apiPost('/commands', form); notify('Commande ajoutée !'); }
+    cmdShowForm = false; cmdEditId = null;
+    renderCommands(document.getElementById('content'));
+  } catch { notify('Erreur', 'error'); }
+}
+
+async function cmdToggle(id, active) {
+  await apiPut(`/commands/${id}`, { active: !active });
+  renderCommands(document.getElementById('content'));
+}
+
+function cmdEdit(id) {
+  const c = cmdData.find(x => x.id === id);
+  if (!c) return;
+  cmdForm = { command: c.command, description: c.description, category: c.category, emoji: c.emoji, active: c.active };
+  cmdEditId = id; cmdShowForm = true;
+  renderCommands(document.getElementById('content'));
+}
+
+async function cmdDel(id) {
+  if (!confirm('Supprimer cette commande ?')) return;
+  await apiDelete(`/commands/${id}`);
+  notify('Supprimée !');
+  renderCommands(document.getElementById('content'));
+}
+
+// ── SETTINGS ────────────────────────────────────────────────
+let settingsData = null, showKey = false;
+
+async function renderSettings(el) {
+  if (!settingsData) {
+    try { settingsData = await apiGet('/settings'); } catch {
+      el.innerHTML = '<div class="text-red-400 font-mono text-sm text-center py-16">Erreur de chargement des paramètres</div>';
+      return;
+    }
+  }
+  const s = settingsData;
+
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Configuration</p>
+        <h2 class="text-2xl font-black text-white font-heading">Paramètres</h2>
+      </div>
+
+      <div class="border border-white/5 bg-[#0B0B10]">
+        <div class="border-b border-white/5 px-5 py-3">
+          <span class="font-mono text-xs uppercase tracking-widest text-zinc-400">🤖 Configuration Bot</span>
+        </div>
+        <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Préfixe IA</label>
+            <input id="set-prefix" value="${esc(s.bot_prefix)}" class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Langue</label>
+            <select id="set-lang" class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+              <option value="fr" ${s.language === 'fr' ? 'selected' : ''}>Français</option>
+              <option value="en" ${s.language === 'en' ? 'selected' : ''}>English</option>
+              <option value="ar" ${s.language === 'ar' ? 'selected' : ''}>العربية</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="border border-white/5 bg-[#0B0B10]">
+        <div class="border-b border-white/5 px-5 py-3">
+          <span class="font-mono text-xs uppercase tracking-widest text-zinc-400">⚡ OpenAI / ChatGPT</span>
+        </div>
+        <div class="p-5 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Modèle GPT</label>
+              <select id="set-model" class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+                <option value="gpt-4o-mini" ${s.gpt_model === 'gpt-4o-mini' ? 'selected' : ''}>gpt-4o-mini (Recommandé)</option>
+                <option value="gpt-4o" ${s.gpt_model === 'gpt-4o' ? 'selected' : ''}>gpt-4o (Plus puissant)</option>
+                <option value="gpt-3.5-turbo" ${s.gpt_model === 'gpt-3.5-turbo' ? 'selected' : ''}>gpt-3.5-turbo (Économique)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Max tokens</label>
+              <input id="set-tokens" type="number" value="${s.max_tokens}" min="100" max="4096"
+                class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+            </div>
+          </div>
+          <div>
+            <label class="block font-mono text-xs text-zinc-500 mb-1 uppercase tracking-widest">Clé API OpenAI</label>
+            <div class="relative">
+              <input id="set-key" type="${showKey ? 'text' : 'password'}" value="${esc(s.openai_api_key)}" placeholder="sk-proj-..."
+                class="w-full bg-[#030305] border border-white/10 text-white px-3 py-2 pr-10 text-sm focus:border-emerald-500 focus:outline-none font-mono">
+              <button type="button" onclick="showKey=!showKey;renderSettings(document.getElementById('content'))"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white transition-colors text-xs font-mono">
+                ${showKey ? '🙈' : '👁'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="border border-white/5 bg-[#0B0B10]">
+        <div class="border-b border-white/5 px-5 py-3">
+          <span class="font-mono text-xs uppercase tracking-widest text-zinc-400">🛡 Modération</span>
+        </div>
+        <div class="divide-y divide-white/5">
+          ${settingToggle('Suppression automatique', 'Supprime les messages interdits', 'auto_delete', s.auto_delete)}
+          ${settingToggle('Notification de groupe', 'Avertit le groupe après suppression', 'notify_group', s.notify_group)}
+          ${settingToggle('Logs en console', 'Journalise les suppressions', 'log_deletions', s.log_deletions)}
+          ${settingToggle('Modération en DM', 'Modère aussi les messages privés', 'moderate_dm', s.moderate_dm)}
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <button onclick="saveSettings()" class="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-black font-bold text-sm hover:bg-emerald-400 transition-colors">
+          💾 Sauvegarder
+        </button>
+        <button onclick="resetSettings()" class="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-white text-sm hover:border-white/30 transition-colors">
+          ↺ Réinitialiser
+        </button>
+      </div>
+    </div>`;
+}
+
+function settingToggle(label, sub, field, value) {
+  return `<div class="flex items-center justify-between p-4">
+    <div>
+      <div class="text-white text-sm font-medium">${label}</div>
+      <div class="text-zinc-500 text-xs font-mono mt-0.5">${sub}</div>
+    </div>
+    <button onclick="settingsData.${field}=!settingsData.${field};renderSettings(document.getElementById('content'))"
+      class="text-lg transition-colors ${value ? 'text-emerald-400' : 'text-zinc-600'}">
+      ${value ? '◉' : '◎'}
+    </button>
+  </div>`;
+}
+
+async function saveSettings() {
+  settingsData.bot_prefix = document.getElementById('set-prefix').value;
+  settingsData.language = document.getElementById('set-lang').value;
+  settingsData.gpt_model = document.getElementById('set-model').value;
+  settingsData.max_tokens = parseInt(document.getElementById('set-tokens').value);
+  settingsData.openai_api_key = document.getElementById('set-key').value;
+  try {
+    await apiPut('/settings', settingsData);
+    notify('Paramètres sauvegardés !');
+  } catch { notify('Erreur lors de la sauvegarde', 'error'); }
+}
+
+function resetSettings() {
+  if (!confirm('Réinitialiser les paramètres ?')) return;
+  settingsData = { bot_prefix: '!ai', language: 'fr', gpt_model: 'gpt-4o-mini', max_tokens: 1024, openai_api_key: '', auto_delete: true, notify_group: true, log_deletions: true, moderate_dm: false };
+  renderSettings(document.getElementById('content'));
+}
+
+// ── GENERATOR ───────────────────────────────────────────────
+let genCode = null, genStats = null, genLoading = false;
+
+function renderGenerator(el) {
+  el.innerHTML = `
+    <div class="space-y-6">
+      <div>
+        <p class="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Exportation</p>
+        <h2 class="text-2xl font-black text-white font-heading">Générateur de Bot</h2>
+        <p class="text-zinc-500 text-sm mt-1">Génère automatiquement votre fichier <span class="font-mono text-emerald-400">index.js</span> depuis vos données du dashboard.</p>
+      </div>
+
+      <div class="p-4 border border-amber-500/20 bg-amber-500/5 flex gap-3">
+        <span class="text-amber-400 shrink-0 mt-0.5">⚠</span>
+        <p class="text-amber-200/80 text-sm">
+          Assurez-vous d'avoir renseigné votre <strong>Clé API OpenAI</strong> dans les Paramètres avant de générer. Elle sera incluse dans le fichier.
+        </p>
+      </div>
+
+      <button onclick="generateBot()" ${genLoading ? 'disabled' : ''}
+        class="flex items-center gap-2 px-6 py-3 bg-emerald-500 text-black font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50">
+        &lt;/&gt; ${genLoading ? 'Génération...' : 'Générer index.js'}
+      </button>
+
+      ${genStats ? `
+      <div class="flex flex-wrap gap-3">
+        ${[{ l: 'commandes', v: genStats.commands }, { l: 'auto-réponses', v: genStats.auto_replies }, { l: 'mots bannis', v: genStats.banned_words }]
+          .map(s => `<div class="flex items-center gap-2 px-3 py-1.5 border border-emerald-500/30 bg-emerald-500/5">
+            <span class="text-emerald-400 text-xs">✓</span>
+            <span class="font-mono text-xs text-emerald-300">${s.v} ${s.l}</span>
+          </div>`).join('')}
+      </div>` : ''}
+
+      ${genCode ? `
+      <div class="border border-emerald-500/20 bg-black">
+        <div class="border-b border-emerald-500/20 px-4 py-3 flex items-center gap-2">
+          <span class="text-emerald-400">&lt;/&gt;</span>
+          <span class="font-mono text-xs text-emerald-400 uppercase tracking-widest">index.js — Aperçu</span>
+          <div class="ml-auto flex gap-2">
+            <button onclick="copyGen()" class="flex items-center gap-1.5 px-3 py-1 border border-white/10 text-zinc-400 hover:text-white text-xs font-mono transition-colors">
+              📋 Copier
+            </button>
+            <button onclick="downloadGen()" class="flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-black font-bold text-xs font-mono hover:bg-emerald-400 transition-colors">
+              ⬇ Télécharger
+            </button>
+          </div>
+        </div>
+        <pre class="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-96 leading-relaxed scrollbar-thin">${esc(genCode)}</pre>
+      </div>` : ''}
+
+      <div class="border border-white/5 bg-[#0B0B10]">
+        <div class="border-b border-white/5 px-5 py-3">
+          <span class="font-mono text-xs uppercase tracking-widest text-zinc-400">Comment utiliser votre bot</span>
+        </div>
+        <div class="p-5 space-y-5">
+          ${[
+            { n: '1', title: 'Installer Node.js et les dépendances', desc: 'Sur votre PC/serveur, ouvrez un terminal et exécutez :', code: 'npm install whatsapp-web.js qrcode-terminal openai' },
+            { n: '2', title: 'Mettre votre clé OpenAI dans les Paramètres', desc: 'Allez dans <span class="text-white">Paramètres → Clé API OpenAI</span> et entrez votre clé <span class="font-mono text-emerald-400">sk-proj-...</span> puis sauvegardez.' },
+            { n: '3', title: 'Générer et télécharger index.js', desc: 'Cliquez sur <span class="text-white font-semibold">Générer index.js</span> ci-dessus, puis <span class="text-white font-semibold">Télécharger</span>. Placez le fichier dans un dossier sur votre PC.' },
+            { n: '4', title: 'Lancer le bot', desc: 'Dans le terminal, dans le dossier où se trouve le fichier :', code: 'node index.js' },
+          ].map(step => `
+            <div class="flex gap-4">
+              <div class="shrink-0 w-7 h-7 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                <span class="text-emerald-400 font-mono text-xs font-bold">${step.n}</span>
+              </div>
+              <div>
+                <p class="text-white text-sm font-semibold mb-1">${step.title}</p>
+                <p class="text-zinc-500 text-xs">${step.desc}</p>
+                ${step.code ? `<div class="bg-black border border-white/5 px-3 py-2 font-mono text-xs text-emerald-300 mt-2">${step.code}</div>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function generateBot() {
+  genLoading = true;
+  renderGenerator(document.getElementById('content'));
+  try {
+    const r = await apiGet('/generate-bot');
+    genCode = r.code;
+    genStats = r.stats;
+  } catch { genCode = '// Erreur lors de la génération'; }
+  genLoading = false;
+  renderGenerator(document.getElementById('content'));
+}
+
+function copyGen() {
+  navigator.clipboard.writeText(genCode);
+  notify('Code copié !');
+}
+
+function downloadGen() {
+  const blob = new Blob([genCode], { type: 'text/javascript' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'index.js'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── UTILS ───────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── INIT ────────────────────────────────────────────────────
+buildNav();
+navigate('overview');
+</script>
+</body>
+</html>
