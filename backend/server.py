@@ -313,6 +313,328 @@ async def get_stats():
 async def root():
     return {"message": "WhatsApp Bot Dashboard API"}
 
+# ── Générateur index.js ───────────────────────────────────────
+
+@api_router.get("/generate-bot")
+async def generate_bot():
+    commands = await db.commands.find({"active": True}, {"_id": 0}).to_list(1000)
+    auto_replies = await db.auto_replies.find({"active": True}, {"_id": 0}).to_list(1000)
+    banned_words = await db.banned_words.find({}, {"_id": 0}).to_list(1000)
+    settings_doc = await db.settings.find_one({}, {"_id": 0})
+    settings = settings_doc or {}
+
+    bot_prefix = settings.get("bot_prefix", "!ai")
+    gpt_model = settings.get("gpt_model", "gpt-4o-mini")
+    max_tokens = settings.get("max_tokens", 1024)
+    api_key = settings.get("openai_api_key", "VOTRE_CLE_ICI")
+    auto_delete = settings.get("auto_delete", True)
+    notify_group = settings.get("notify_group", True)
+
+    banned_list = [w["word"] for w in banned_words]
+    banned_str = ",\n  ".join(f'"{w}"' for w in banned_list)
+
+    # Génération des auto-réponses
+    auto_reply_blocks = []
+    for r in auto_replies:
+        t = r["trigger"].replace('"', '\\"')
+        resp = r["response"].replace('"', '\\"').replace('\n', '\\n')
+        rtype = r["type"]
+        if rtype == "exact":
+            cond = f'lower === "{t}"'
+        elif rtype == "contains":
+            cond = f'lower.includes("{t}")'
+        else:
+            cond = f'/{t}/i.test(lower)'
+        auto_reply_blocks.append(
+            f'  if ({cond}) {{\n'
+            f'    await msg.reply("{resp}");\n'
+            f'    logToDashboard("autoreply", "Auto-réponse déclenchée", \'Trigger "{t}" → réponse envoyée dans \' + (chat.name || msg.from));\n'
+            f'    return;\n'
+            f'  }}'
+        )
+    auto_replies_code = "\n".join(auto_reply_blocks) if auto_reply_blocks else "  // Aucune auto-réponse active"
+
+    # Génération des commandes custom (non-builtin)
+    builtin_cmds = {"!ai", "!manger", "!pile", "!dé", "!choisir", "!blague", "!motivation", "!fact", "!compliment", "!excuse", "!horoscope", "!ragequit", "!sondage", "!rappel", "!météo", "!meteo", "!licorne", "!regle"}
+    custom_commands = [c for c in commands if c["command"].split(" ")[0].lower() not in builtin_cmds]
+
+    custom_cmd_blocks = []
+    for c in custom_commands:
+        cmd_trigger = c["command"].split(" ")[0].lower().replace('"', '\\"')
+        desc = c["description"].replace('"', '\\"')
+        emoji = c.get("emoji", "🤖")
+        custom_cmd_blocks.append(
+            f'  if (lower === "{cmd_trigger}") {{\n'
+            f'    await msg.reply("{emoji} *{desc}*");\n'
+            f'    logToDashboard("command", "Commande {cmd_trigger} exécutée", \'Utilisée dans \' + (chat.name || msg.from));\n'
+            f'    return;\n'
+            f'  }}'
+        )
+    custom_cmds_code = "\n\n".join(custom_cmd_blocks) if custom_cmd_blocks else "  // Aucune commande custom"
+
+    # Liste !licorne dynamique
+    licorne_lines = []
+    by_cat = {}
+    for c in commands:
+        cat = c.get("category", "Fun")
+        by_cat.setdefault(cat, []).append(c)
+    for cat, cmds in by_cat.items():
+        licorne_lines.append(f"*{cat} :*")
+        for c in cmds:
+            licorne_lines.append(f"`{c['command']}` — {c['description']}")
+        licorne_lines.append("")
+    licorne_str = "\\\\n".join(licorne_lines)
+
+    dashboard_url = "https://how-to-use-48.preview.emergentagent.com"
+
+    notify_line = (
+        f'await chat.sendMessage(\'nhaaaaaaa ca respecte pas les regles fais !regle pour les voir\');'
+        if notify_group else ""
+    )
+    delete_block = f"""
+  if (shouldDelete(text)) {{
+    try {{
+      {'await msg.delete(true);' if auto_delete else '// suppression désactivée'}
+      const groupName = chat.name || msg.from;
+      console.log(`🗑️  Supprimé [${{groupName}}] : "${{text.substring(0, 50)}}"`);
+      logToDashboard("delete", "Message supprimé", `Mot interdit dans ${{groupName}} : "${{text.substring(0, 30)}}"`);
+      if (chat.isGroup) {{ {notify_line} }}
+    }} catch (err) {{
+      console.warn("⚠️  Impossible de supprimer :", err.message);
+    }}
+    return;
+  }}""" if auto_delete else ""
+
+    code = f'''// ============================================================
+//  WhatsApp Bot — Généré automatiquement par CROUS Dashboard
+//  API : OpenAI ({gpt_model})
+//  Dépendances : whatsapp-web.js, qrcode-terminal, openai
+// ============================================================
+
+const {{ Client, LocalAuth }} = require("whatsapp-web.js");
+const qrcode = require("qrcode-terminal");
+const OpenAI = require("openai");
+const https = require("https");
+
+// ── Configuration ─────────────────────────────────────────────
+const OPENAI_API_KEY = "{api_key}";
+const BOT_PREFIX = "{bot_prefix}";
+const DASHBOARD_URL = "{dashboard_url}";
+
+// ── Envoi de logs au dashboard ────────────────────────────────
+function logToDashboard(type, message, detail) {{
+  const body = JSON.stringify({{ type, message, detail }});
+  const url = new URL(DASHBOARD_URL + "/api/activity");
+  const options = {{
+    hostname: url.hostname,
+    port: 443,
+    path: url.pathname,
+    method: "POST",
+    headers: {{ "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }},
+  }};
+  const req = https.request(options);
+  req.on("error", () => {{}});
+  req.write(body);
+  req.end();
+}}
+
+// ── Mots bannis ───────────────────────────────────────────────
+const BANNED_WORDS = [
+  {banned_str}
+];
+
+function shouldDelete(text) {{
+  const lower = text.toLowerCase();
+  return BANNED_WORDS.some((word) => lower.includes(word));
+}}
+
+// ── Client OpenAI ─────────────────────────────────────────────
+const openai = new OpenAI({{ apiKey: OPENAI_API_KEY }});
+
+async function askChatGPT(question) {{
+  try {{
+    const response = await openai.chat.completions.create({{
+      model: "{gpt_model}",
+      max_tokens: {max_tokens},
+      messages: [
+        {{ role: "system", content: "Tu es un etudiant, soit concis et de maniere jeune. Réponds en français sauf si l\\'utilisateur écrit dans une autre langue." }},
+        {{ role: "user", content: question }},
+      ],
+    }});
+    return response.choices[0].message.content;
+  }} catch (err) {{
+    return "❌ Désolé, réessaie dans un moment.";
+  }}
+}}
+
+async function getAI(prompt, system) {{
+  const r = await openai.chat.completions.create({{
+    model: "{gpt_model}", max_tokens: 200,
+    messages: [{{ role: "system", content: system }}, {{ role: "user", content: prompt }}],
+  }});
+  return r.choices[0].message.content;
+}}
+
+// ── Client WhatsApp ───────────────────────────────────────────
+const client = new Client({{
+  authStrategy: new LocalAuth({{ dataPath: "./session" }}),
+  puppeteer: {{ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }},
+}});
+
+client.on("qr", (qr) => {{ console.log("\\n📱 Scanne ce QR code avec WhatsApp :\\n"); qrcode.generate(qr, {{ small: true }}); }});
+client.on("authenticated", () => console.log("✅ Authentifié !"));
+client.on("ready", () => console.log(`🤖 Bot prêt ! Préfixe IA: "${{BOT_PREFIX}}" | ${{BANNED_WORDS.length}} mots surveillés`));
+
+// ── Menus CROUS ───────────────────────────────────────────────
+const MENUS_CROUS = [
+  "🍝 Lasagnes bolognaise + salade verte + yaourt",
+  "🍗 Poulet rôti + riz cantonais + compote",
+  "🐟 Cabillaud sauce citron + purée + fruit",
+  "🥩 Steak haché + frites + fromage blanc",
+  "🥗 Quiche lorraine + salade + crème caramel",
+  "🍲 Gratin dauphinois + jambon + mousse chocolat",
+  "🌮 Chili con carne + pain + flan",
+  "🍜 Soupe + croque-monsieur + salade de fruits",
+];
+
+// ── Traitement des messages ───────────────────────────────────
+client.on("message", async (msg) => {{
+  const text = msg.body || "";
+  const chat = await msg.getChat();
+  const lower = text.trim().toLowerCase();
+{delete_block}
+  // ── Auto-réponses (générées depuis le dashboard) ──────────
+{auto_replies_code}
+
+  // ── Commandes builtin ─────────────────────────────────────
+  if (lower === "!manger") {{
+    const menu = MENUS_CROUS[Math.floor(Math.random() * MENUS_CROUS.length)];
+    await msg.reply(`🍽️ *Menu du CROUS :*\\n\\n${{menu}}\\n\\nBon appétit... ou pas 😅`);
+    logToDashboard("command", "Commande !manger exécutée", `Menu envoyé dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!pile") {{
+    await msg.reply(Math.random() < 0.5 ? "🪙 PILE !" : "🪙 FACE !");
+    logToDashboard("command", "Commande !pile exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+  if (lower === "!dé") {{
+    await msg.reply(`🎲 Le dé donne : *${{Math.floor(Math.random() * 6) + 1}}*`);
+    logToDashboard("command", "Commande !dé exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower.startsWith("!choisir ")) {{
+    const options = text.slice(9).trim().split(" ");
+    if (options.length < 2) {{ await msg.reply("❌ Donne au moins 2 options !"); return; }}
+    await msg.reply(`🤔 J\\'ai choisi : *${{options[Math.floor(Math.random() * options.length)]}}* !`);
+    logToDashboard("command", "Commande !choisir exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!blague") {{
+    await chat.sendStateTyping();
+    await msg.reply(`😂 *Blague :*\\n\\n${{await getAI("Raconte une blague drôle.", "Tu racontes des blagues courtes et drôles en français.")}}`);
+    logToDashboard("command", "Commande !blague exécutée", `Blague IA envoyée dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!motivation") {{
+    await chat.sendStateTyping();
+    await msg.reply(`💪 *Citation :*\\n\\n${{await getAI("Donne une citation motivante.", "Tu donnes des citations motivantes humoristiques pour étudiants CROUS.")}}`);
+    logToDashboard("command", "Commande !motivation exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower.startsWith("!fact ")) {{
+    await chat.sendStateTyping();
+    const cible = text.slice(6).trim();
+    await msg.reply(`🔥 *Roast :*\\n\\n${{await getAI(`Roast drôle pour ${{cible}}`, "Tu fais des roasts drôles et bienveillants en français.")}}`);
+    logToDashboard("command", "Commande !fact exécutée", `Roast pour ${{cible}} dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower.startsWith("!compliment ")) {{
+    await chat.sendStateTyping();
+    const cible2 = text.slice(12).trim();
+    await msg.reply(`🌸 *Compliment :*\\n\\n${{await getAI(`Compliment exagéré pour ${{cible2}}`, "Tu fais des compliments exagérés et hilarants.")}}`);
+    logToDashboard("command", "Commande !compliment exécutée", `Compliment pour ${{cible2}} dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!excuse") {{
+    await chat.sendStateTyping();
+    await msg.reply(`📝 *Excuse :*\\n\\n${{await getAI("Invente une excuse absurde pour ne pas aller en cours.", "Tu inventes des excuses absurdes en français.")}}`);
+    logToDashboard("command", "Commande !excuse exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!horoscope") {{
+    await chat.sendStateTyping();
+    const signes = ["Bélier","Taureau","Gémeaux","Cancer","Lion","Vierge","Balance","Scorpion","Sagittaire","Capricorne","Verseau","Poissons"];
+    const s = signes[Math.floor(Math.random() * signes.length)];
+    await msg.reply(`🔮 *${{s}} :*\\n\\n${{await getAI(`Horoscope drôle pour ${{s}}`, "Tu inventes des horoscopes dramatiques et absurdes.")}}`);
+    logToDashboard("command", "Commande !horoscope exécutée", `${{s}} dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!météo" || lower === "!meteo") {{
+    await chat.sendStateTyping();
+    await msg.reply(`🌦️ *Météo :*\\n\\n${{await getAI("Donne la météo du jour.", "Tu inventes une météo dramatique et philosophique pour étudiants. Court.")}}`);
+    logToDashboard("command", "Commande !météo exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!ragequit") {{
+    await msg.reply("C\\'est bon j\\'en peux plus... 🚪\\n\\n...\\n\\n(je suis toujours là 😐)");
+    logToDashboard("command", "Commande !ragequit exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower.startsWith("!sondage ")) {{
+    await chat.sendMessage(`📊 *Sondage :*\\n\\n❓ ${{text.slice(9).trim()}}\\n\\n👍 Pour\\n👎 Contre`);
+    logToDashboard("command", "Commande !sondage exécutée", `"${{text.slice(9, 40).trim()}}" dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!rappel") {{
+    await msg.reply("⚠️ *Rappel des règles :*\\n\\n1. Pas d\\'insultes\\n2. Pas de politique\\n3. Pas de religion\\n\\nMerci 🙏");
+    logToDashboard("command", "Commande !rappel exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!regle") {{
+    await msg.reply("📋 *Règles du groupe :*\\n\\n🚫 Insultes interdites\\n🚫 Politique interdite\\n🚫 Religion interdite\\n\\nTout manquement = suppression du message ✅");
+    logToDashboard("command", "Commande !regle exécutée", `Dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  if (lower === "!licorne") {{
+    await msg.reply("📋 *Commandes disponibles :*\\n\\n{licorne_str}");
+    logToDashboard("command", "Commande !licorne exécutée", `Liste des commandes dans ${{chat.name || msg.from}}`);
+    return;
+  }}
+
+  // ── Commandes custom (générées depuis le dashboard) ───────
+{custom_cmds_code}
+
+  // ── Commande IA ───────────────────────────────────────────
+  if (lower.startsWith(BOT_PREFIX)) {{
+    const question = text.slice(BOT_PREFIX.length).trim();
+    if (!question) {{ await msg.reply(`👋 Pose une question après *${{BOT_PREFIX}}*\\nEx : \`${{BOT_PREFIX}} c\\'est quoi l\\'IA ?\``); return; }}
+    await chat.sendStateTyping();
+    const answer = await askChatGPT(question);
+    await msg.reply(`🤖 *Assistant IA*\\n\\n${{answer}}`);
+    logToDashboard("command", `Commande ${{BOT_PREFIX}} exécutée`, `"${{question.substring(0, 40)}}" dans ${{chat.name || msg.from}}`);
+  }}
+}});
+
+client.initialize();
+'''
+    return {"code": code, "stats": {"commands": len(commands), "auto_replies": len(auto_replies), "banned_words": len(banned_words)}}
+
+
 app.include_router(api_router)
 
 app.add_middleware(

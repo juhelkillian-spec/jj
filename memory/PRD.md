@@ -31,3 +31,9 @@ Créer une application dashboard pour gérer un bot WhatsApp CROUS. Pouvoir ajou
 - QR Code WhatsApp dans le dashboard pour connecter le bot
 - Statistiques avancées avec graphiques
 - Historique des commandes exécutées
+
+## Ajout (2026-04-08) — Générateur index.js
+- Route backend GET /api/generate-bot qui construit dynamiquement le fichier index.js complet
+- Section "Générateur" dans le dashboard avec aperçu du code + bouton Copier + bouton Télécharger
+- Instructions étape par étape intégrées dans le dashboard (install, config, lancement, QR code)
+- Affichage de l'URL du dashboard dans la section Générateur

@@ -5,7 +5,9 @@ import {
   Gear, House, Plus, Trash, PencilSimple, Check,
   X, MagnifyingGlass, ArrowClockwise, FloppyDisk,
   Circle, Lightning, Smiley, GameController, Wrench,
-  Eye, EyeSlash, ToggleLeft, ToggleRight
+  Eye, EyeSlash, ToggleLeft, ToggleRight, Code, DownloadSimple,
+  Copy, Warning, ArrowRight, NumberCircleOne, NumberCircleTwo,
+  NumberCircleThree, NumberCircleFour
 } from "@phosphor-icons/react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -688,6 +690,186 @@ function Settings({ notify }) {
   );
 }
 
+// ── Section : Générateur index.js ────────────────────────────
+
+function Generator() {
+  const [code, setCode] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const generate = async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(`${API}/generate-bot`);
+      setCode(r.data.code);
+      setStats(r.data.stats);
+    } catch { setCode("// Erreur lors de la génération"); }
+    setLoading(false);
+  };
+
+  const download = () => {
+    const blob = new Blob([code], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "index.js"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-widest text-zinc-500 mb-1">Exportation</p>
+        <h2 className="text-2xl font-black text-white" style={{ fontFamily: "Unbounded, sans-serif" }}>Générateur de Bot</h2>
+        <p className="text-zinc-500 text-sm mt-1">Génère automatiquement votre fichier <span className="font-mono text-emerald-400">index.js</span> depuis vos données du dashboard.</p>
+      </div>
+
+      {/* Info box */}
+      <div className="p-4 border border-amber-500/20 bg-amber-500/5 flex gap-3">
+        <Warning size={18} className="text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-amber-200/80 text-sm">
+          Assurez-vous d'avoir renseigné votre <strong>Clé API OpenAI</strong> dans les Paramètres avant de générer. Elle sera incluse dans le fichier.
+        </p>
+      </div>
+
+      {/* Generate button */}
+      <button
+        data-testid="generate-btn"
+        onClick={generate}
+        disabled={loading}
+        className="flex items-center gap-2 px-6 py-3 bg-emerald-500 text-black font-bold hover:bg-emerald-400 transition-colors duration-200 disabled:opacity-50"
+      >
+        <Code size={18} /> {loading ? "Génération..." : "Générer index.js"}
+      </button>
+
+      {/* Stats summary */}
+      {stats && (
+        <div className="flex flex-wrap gap-3" data-testid="gen-stats">
+          {[
+            { label: "commandes", val: stats.commands },
+            { label: "auto-réponses", val: stats.auto_replies },
+            { label: "mots bannis", val: stats.banned_words },
+          ].map(s => (
+            <div key={s.label} className="flex items-center gap-2 px-3 py-1.5 border border-emerald-500/30 bg-emerald-500/5">
+              <Check size={12} className="text-emerald-400" />
+              <span className="font-mono text-xs text-emerald-300">{s.val} {s.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Code preview */}
+      {code && (
+        <div className="border border-emerald-500/20 bg-black">
+          <div className="border-b border-emerald-500/20 px-4 py-3 flex items-center gap-2">
+            <Code size={14} className="text-emerald-400" />
+            <span className="font-mono text-xs text-emerald-400 uppercase tracking-widest">index.js — Aperçu</span>
+            <div className="ml-auto flex gap-2">
+              <button onClick={copyCode} data-testid="copy-code-btn" className="flex items-center gap-1.5 px-3 py-1 border border-white/10 text-zinc-400 hover:text-white text-xs font-mono transition-colors duration-200">
+                {copied ? <><Check size={12} /> Copié !</> : <><Copy size={12} /> Copier</>}
+              </button>
+              <button onClick={download} data-testid="download-btn" className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500 text-black font-bold text-xs font-mono hover:bg-emerald-400 transition-colors duration-200">
+                <DownloadSimple size={12} /> Télécharger
+              </button>
+            </div>
+          </div>
+          <pre className="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-96 leading-relaxed" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+            {code}
+          </pre>
+        </div>
+      )}
+
+      {/* Instructions d'utilisation */}
+      <div className="border border-white/5 bg-[#0B0B10]">
+        <div className="border-b border-white/5 px-5 py-3">
+          <span className="font-mono text-xs uppercase tracking-widest text-zinc-400">Comment utiliser votre bot</span>
+        </div>
+        <div className="p-5 space-y-5">
+
+          {/* Étape 1 */}
+          <div className="flex gap-4">
+            <div className="shrink-0 w-7 h-7 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <span className="text-emerald-400 font-mono text-xs font-bold">1</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-semibold mb-1">Installer Node.js et les dépendances</p>
+              <p className="text-zinc-500 text-xs mb-2">Sur votre PC/serveur, ouvrez un terminal et exécutez :</p>
+              <div className="bg-black border border-white/5 px-3 py-2 font-mono text-xs text-emerald-300">
+                npm install whatsapp-web.js qrcode-terminal openai
+              </div>
+            </div>
+          </div>
+
+          {/* Étape 2 */}
+          <div className="flex gap-4">
+            <div className="shrink-0 w-7 h-7 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <span className="text-emerald-400 font-mono text-xs font-bold">2</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-semibold mb-1">Mettre votre clé OpenAI dans les Paramètres</p>
+              <p className="text-zinc-500 text-xs">Allez dans <span className="text-white">Paramètres → Clé API OpenAI</span> et entrez votre clé <span className="font-mono text-emerald-400">sk-proj-...</span> puis sauvegardez.</p>
+            </div>
+          </div>
+
+          {/* Étape 3 */}
+          <div className="flex gap-4">
+            <div className="shrink-0 w-7 h-7 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <span className="text-emerald-400 font-mono text-xs font-bold">3</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-semibold mb-1">Générer et télécharger index.js</p>
+              <p className="text-zinc-500 text-xs">Cliquez sur <span className="text-white font-semibold">Générer index.js</span> ci-dessus, puis <span className="text-white font-semibold">Télécharger</span>. Placez le fichier dans un dossier sur votre PC.</p>
+            </div>
+          </div>
+
+          {/* Étape 4 */}
+          <div className="flex gap-4">
+            <div className="shrink-0 w-7 h-7 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <span className="text-emerald-400 font-mono text-xs font-bold">4</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-semibold mb-1">Lancer le bot</p>
+              <p className="text-zinc-500 text-xs mb-2">Dans le terminal, dans le dossier où se trouve le fichier :</p>
+              <div className="bg-black border border-white/5 px-3 py-2 font-mono text-xs text-emerald-300">
+                node index.js
+              </div>
+              <p className="text-zinc-500 text-xs mt-2">Un QR code s'affiche dans le terminal. Scannez-le avec WhatsApp (<span className="text-white">Appareils liés → Lier un appareil</span>).</p>
+            </div>
+          </div>
+
+          {/* Étape 5 */}
+          <div className="flex gap-4">
+            <div className="shrink-0 w-7 h-7 bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+              <span className="text-cyan-400 font-mono text-xs font-bold">+</span>
+            </div>
+            <div>
+              <p className="text-white text-sm font-semibold mb-1">Mise à jour des commandes</p>
+              <p className="text-zinc-500 text-xs">À chaque fois que vous ajoutez une commande ou auto-réponse depuis le dashboard, <span className="text-white">régénérez et re-téléchargez</span> le fichier, puis relancez le bot.</p>
+            </div>
+          </div>
+
+          {/* Accès dashboard */}
+          <div className="mt-4 p-4 border border-cyan-500/20 bg-cyan-500/5">
+            <p className="font-mono text-xs text-cyan-400 uppercase tracking-widest mb-2">Accès au Dashboard</p>
+            <p className="text-zinc-300 text-sm mb-2">Ce dashboard est accessible depuis n'importe quel navigateur à l'adresse :</p>
+            <div className="bg-black border border-white/5 px-3 py-2 font-mono text-xs text-cyan-300 break-all select-all" data-testid="dashboard-url">
+              {window.location.origin}
+            </div>
+            <p className="text-zinc-500 text-xs mt-2">Bookmarkez cette URL pour y accéder rapidement depuis votre téléphone ou PC.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Navigation ────────────────────────────────────────────────
 
 const NAV = [
@@ -696,6 +878,7 @@ const NAV = [
   { id: "banned", icon: <ShieldWarning size={18} />, label: "Mots Bannis" },
   { id: "commands", icon: <Terminal size={18} />, label: "Commandes" },
   { id: "settings", icon: <Gear size={18} />, label: "Paramètres" },
+  { id: "generator", icon: <Code size={18} />, label: "Générateur" },
 ];
 
 // ── Dashboard principal ───────────────────────────────────────
@@ -730,6 +913,7 @@ export default function Dashboard() {
       case "banned": return <BannedWords notify={notify} />;
       case "commands": return <Commands notify={notify} />;
       case "settings": return <Settings notify={notify} />;
+      case "generator": return <Generator />;
       default: return null;
     }
   };
